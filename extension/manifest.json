@@ -1,0 +1,53 @@
+/**
+ * IMPORTANT — The "key" field below:
+ *
+ * Chrome MV3 extensions need a stable extension ID so that the backend's
+ * CORS policy can whitelist a predictable `chrome-extension://<ID>` origin.
+ * The "key" field pins that ID even when the extension is loaded unpacked.
+ *
+ * HOW TO GENERATE YOUR OWN KEY
+ * ─────────────────────────────
+ * 1. Open chrome://extensions → enable Developer Mode.
+ * 2. Pack Extension (any directory) — Chrome generates a .pem file.
+ * 3. Run:
+ *      openssl rsa -in <your>.pem -pubout -outform DER \
+ *        | openssl base64 -A
+ * 4. Paste the resulting base64 string as the value of "key" below.
+ * 5. Reload the extension — your ID is now stable.
+ *
+ * Until you do this, remove or leave the placeholder; Chrome will assign
+ * a random ID each time you load unpacked (CORS will fail).
+ */
+{
+  "manifest_version": 3,
+  "name": "LeetCode Contest Monitor",
+  "version": "1.0.0",
+  "description": "Monitors Users Accepted percentages for all 4 problems in a LeetCode contest.",
+  "key": "PLACEHOLDER_KEY_SEE_DOCUMENTATION",
+  "permissions": ["tabs", "storage", "alarms", "sidePanel", "scripting"],
+  "host_permissions": ["https://leetcode.com/*"],
+  "background": {
+    "service_worker": "background/background.js",
+    "type": "module"
+  },
+  "side_panel": {
+    "default_path": "ui/sidepanel.html"
+  },
+  "action": {
+    "default_popup": "ui/popup.html",
+    "default_title": "LeetCode Contest Monitor"
+  },
+  "options_page": "ui/options.html",
+  "content_scripts": [
+    {
+      "matches": ["https://leetcode.com/contest/*"],
+      "js": ["content-scripts/contestPageScript.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://leetcode.com/contest/*/problems/*"],
+      "js": ["content-scripts/problemPageScript.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

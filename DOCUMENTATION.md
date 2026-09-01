@@ -1,0 +1,132 @@
+# LeetCode Contest Monitor v5 — Documentation
+
+> [!IMPORTANT]
+> **Start the backend before using the extension.** The extension will display a "Backend not running" banner and all monitoring will be inactive until the Spring Boot server is running.
+
+## Quick Start
+
+### 1. Start the Backend
+```bash
+cd backend
+mvn spring-boot:run
+# Server starts on http://localhost:8080 (localhost only)
+```
+
+### 2. Install the Extension
+1. Open Chrome → `chrome://extensions`
+2. Enable "Developer mode" (top right)
+3. Click "Load unpacked" → select the `extension/` directory
+4. Note the Extension ID shown on the card
+
+### 3. Pin the Extension ID (Required for CORS)
+To keep the extension ID stable across reloads:
+```bash
+openssl genrsa 2048 | openssl pkcs8 -topk8 -nocrypt -out key.pem
+openssl rsa -in key.pem -pubout -outform DER | openssl base64 -A
+```
+Paste the base64 output into the `"key"` field in `extension/manifest.json`.
+Update the `EXTENSION_ORIGIN` constant in `backend/src/main/java/com/leetcode/monitor/config/CorsConfig.java` with `chrome-extension://<your-id>`.
+
+### 4. Configure the Contest URL
+1. Click the extension icon → options page
+2. Enter the LeetCode contest URL (e.g. `https://leetcode.com/contest/weekly-contest-400/`)
+3. Click Save — discovery begins automatically
+
+## Architecture
+
+| Component | Technology | Responsibility |
+|---|---|---|
+| Extension | Chrome MV3, JavaScript | DOM scraping, tab lifecycle, alarm scheduling |
+| Backend | Spring Boot 3.x, Java 17 | Parsing, calculation, ranking, state, REST API |
+| Communication | HTTP/JSON, localhost:8080 | POST ingest, GET status/health |
+
+## REST API Contract
+
+### POST /api/contest/config
+Registers contest metadata after discovery.
+```json
+{
+  "contestUrl": "https://leetcode.com/contest/...",
+  "questions": [
+    { "questionNumber": "Q1", "problemName": "...", "problemUrl": "..." }
+  ]
+}
+```
+
+### POST /api/contest/ingest/{questionNumber}
+Called once per question per monitoring cycle.
+```json
+// On success:
+{ "rawUsersAccepted": "28,903 / 31.1K", "scrapingStatus": "SUCCESS", "selectorStrategyUsed": "text-anchored" }
+// On failure:
+{ "scrapingStatus": "LOGIN_WALL" }
+```
+
+### GET /api/contest/status
+Returns the latest ContestStats snapshot.
+```json
+{
+  "lastUpdated": "2024-01-01T12:00:00Z",
+  "questions": [ ... ],
+  "ranking": ["Q3", "Q1", "Q4", "Q2"],
+  "recentChanges": [ { "description": "Q3 overtook Q1", "timestamp": "..." } ]
+}
+```
+
+### GET /api/contest/health
+```json
+{
+  "status": "OK",
+  "lifecycleState": "MONITORING",
+  "backendVersion": "1.0.0",
+  "lastIngestReceivedAt": { "Q1": "...", "Q2": "...", "Q3": "...", "Q4": "..." }
+}
+```
+
+## Scraping Status Values
+| Status | Meaning |
+|---|---|
+| `SUCCESS` | Raw string scraped and sent |
+| `LOGIN_WALL` | Login form detected — user must be logged in |
+| `SELECTOR_NOT_FOUND` | "Users Accepted" element not found |
+| `PARSE_ERROR` | Backend could not parse the raw string |
+| `NAVIGATION_TIMEOUT` | Page load timed out |
+| `PAGE_UNAVAILABLE` | Page returned error or is inaccessible |
+| `BROWSER_ERROR` | Chrome extension error |
+| `TAB_MISSING` | Background tab was closed; recovery attempted |
+| `UNKNOWN_ERROR` | Unexpected error |
+
+## Security Notes
+- Backend binds to `127.0.0.1` only — never accessible from LAN
+- CORS restricted to `chrome-extension://<pinned-id>` — never `*`
+- No LeetCode credentials, cookies, or tokens are read, stored, or logged on either side
+- Backend only ever receives already-scraped text strings
+
+## Module Reference
+
+### Extension
+| File | Purpose |
+|---|---|
+| `background/background.js` | Service worker entry point |
+| `background/tabLifecycleManager.js` | 4-tab persistence, reload cycle, recovery |
+| `background/alarmScheduler.js` | 5-minute alarm, cycleInProgress guard |
+| `background/backendClient.js` | HTTP client for all backend calls |
+| `content-scripts/contestPageScript.js` | Contest homepage discovery |
+| `content-scripts/problemPageScript.js` | Problem page scraping |
+| `ui/sidepanel.html/js/css` | Dashboard, polls backend every 5s |
+| `ui/popup.html/js` | Lightweight fallback |
+| `ui/options.html/js` | Contest URL configuration |
+
+### Backend
+| File | Purpose |
+|---|---|
+| `ContestConfigController.java` | POST /api/contest/config |
+| `ContestIngestController.java` | POST /api/contest/ingest/{q} |
+| `ContestStatusController.java` | GET /api/contest/status |
+| `ContestHealthController.java` | GET /api/contest/health |
+| `ContestStateService.java` | Critical section, AtomicReference snapshot |
+| `AcceptanceCalculationService.java` | BigDecimal percentage |
+| `ComparisonService.java` | Pairwise overtake detection |
+| `ContestLifecycleService.java` | Signal-based ENDED detection |
+| `AcceptanceStatsParser.java` | Raw string → BigDecimal |
+| `CorsConfig.java` | CORS restricted to extension origin |
