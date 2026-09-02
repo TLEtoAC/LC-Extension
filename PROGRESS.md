@@ -1,0 +1,171 @@
+# PROGRESS.md — LeetCode Contest Acceptance Monitor v5
+
+> Single source of truth for build progress. Updated after every phase.  
+> Architecture: Chrome MV3 Extension (DOM scraping) ↔ HTTP/JSON ↔ Local Spring Boot Backend (Java 17)
+
+---
+
+## Build Status
+
+| Component | Status |
+|---|---|
+| Backend (`mvn test`) | ✅ **56 / 56 tests passing** |
+| Extension (syntax check) | ✅ All JS files pass `node --check` |
+| GitHub (`origin/phase1`) | ✅ Latest commit: `5c0ea2e` |
+
+---
+
+## Phase Completion Tracker
+
+| # | Phase | Lead Agent | Status | Commit / Notes |
+|:---:|---|---|:---:|---|
+| 1 | Backend Skeleton | REST API Agent | ✅ Done | `88ecec7` |
+| 2 | Extension Scaffold + Tab Lifecycle | Extension/Background Agent | ✅ Done | `88ecec7` |
+| 3a | Discovery — `contestPageScript.js` | Content Script/DOM Agent | ✅ Done | `5c0ea2e` |
+| 3b | Config API — `ContestConfigController` + Models | REST API Agent | ✅ Done | `5c0ea2e` |
+| 3c | background.js discovery wiring | Extension/Background Agent | ✅ Done | `5c0ea2e` |
+| 4 | Single-Q Scraping — `problemPageScript.js` + `ContestIngestController` | Content Script/DOM + REST API Agents | ✅ Done | `5c0ea2e` |
+| 5 | Parser Hardening — `AcceptanceStatsParser` + BigDecimal tests | Parser/Data Agent + Testing/QA Agent | ✅ Done | files present, 40 parser tests passing |
+| 6 | Four Questions + Concurrency | Extension/Background + Backend/Core Agents | 🔲 Pending | — |
+| 7 | Alarm Scheduler | Extension/Background Agent | 🔲 Pending | — |
+| 8 | State + Ranking | Backend/Core Agent | 🔲 Pending | — |
+| 9 | Overtaking Detection | Backend/Core Agent | 🔲 Pending | — |
+| 10 | Status/Health API + Side Panel UI | REST API + UI Agents | 🔲 Pending | — |
+| 11 | Robustness + Lifecycle | Backend/Core + Ext/Background + Edge-Case Red Team | 🔲 Pending | — |
+| — | Continuous Docs | Logging/Docs Agent | 🔄 Active | All 5 artifacts maintained |
+
+---
+
+## Files Implemented (as of 2026-09-03)
+
+### Extension (`extension/`)
+
+| File | Phase | Description |
+|---|:---:|---|
+| `manifest.json` | 2 | MV3 manifest — permissions, side panel, content script patterns, key placeholder |
+| `package.json` | 2 | Jest ^29 test config |
+| `background/background.js` | 2 / 3c | Service worker entry — message router, alarm handler, discovery wiring, 4-tab setup |
+| `background/tabLifecycleManager.js` | 2 | Tab persistence (storage-backed), event-driven reload (`chrome.tabs.onUpdated`), `cycleInProgress` guard |
+| `background/backendClient.js` | 2 | `fetch()` wrapper — `checkHealth`, `postConfig`, `postIngest` (drop-on-unreachable), `getStatus` |
+| `content-scripts/contestPageScript.js` | 3a | Contest homepage discovery — `MutationObserver`, href-first + click-and-capture fallback, 5 selector strategies |
+| `content-scripts/problemPageScript.js` | 4 | Problem page scraper — `MutationObserver`, 3-tier selector chain, double-read stability, login-wall & 404 detection |
+| `ui/options.html` | 2 | Contest URL input page |
+| `ui/options.js` | 2 | URL validation, `chrome.storage.local` persistence, sends `CONTEST_URL_SAVED` to SW |
+| `tests/httpBoundaryProof.md` | 2 | Manual test guide for the extension↔backend HTTP boundary |
+
+### Backend (`backend/`)
+
+| File | Phase | Description |
+|---|:---:|---|
+| `pom.xml` | 1 | Spring Boot 3.2.5, Java 17, Web + Test — no Playwright |
+| `src/main/resources/application.properties` | 1 | Binds to `127.0.0.1:8080` (loopback only) |
+| `config/CorsConfig.java` | 1 | CORS restricted to `chrome-extension://PLACEHOLDER_EXTENSION_ID` |
+| `controller/ContestHealthController.java` | 1 | `GET /api/contest/health` — status, version, timestamp |
+| `controller/ContestConfigController.java` | 3b | `POST /api/contest/config` — validates 4 questions, initializes state |
+| `controller/ContestIngestController.java` | 4 | `POST /api/contest/ingest/{Q1-Q4}` — validates, delegates to `ContestStateService.applyIngest` |
+| `dto/ContestConfigRequest.java` | 3b | Inbound DTO for contest configuration |
+| `dto/ContestIngestRequest.java` | 4 | Inbound DTO for scrape result ingestion |
+| `model/ScrapingStatus.java` | 3b | Enum: `SUCCESS`, `LOGIN_WALL`, `SELECTOR_NOT_FOUND`, `PARSE_ERROR`, `NAVIGATION_TIMEOUT`, `PAGE_UNAVAILABLE`, `BROWSER_ERROR`, `TAB_MISSING`, `UNKNOWN_ERROR` |
+| `model/Question.java` | 3b | Immutable record: `questionNumber`, `problemName`, `problemUrl` |
+| `model/QuestionStats.java` | 3b | Metric container with `uninitialised(Question)` factory |
+| `model/ContestStats.java` | 3b | Immutable snapshot — `questions`, `ranking`, `recentChanges`, `lifecycleState`, `pairwiseRelationships` |
+| `model/RankingChange.java` | 3b | Overtake event record |
+| `parser/AcceptanceStatsParser.java` | 5 | Parses `"28,903 / 31.1K"` → `BigDecimal` — K/M/B suffix support, zero `double` math |
+| `parser/ParsedAcceptance.java` | 5 | Record: `BigDecimal acceptedUsers`, `BigDecimal totalUsers` |
+| `parser/ParseException.java` | 5 | Checked exception for malformed input |
+| `service/ContestStateService.java` | 3b / 4 | `AtomicReference<ContestStats>` + `synchronized` critical section for `initializeContest` and `applyIngest` |
+
+### Test Suite (`backend/src/test/`)
+
+| Test Class | Tests | Phase | Coverage |
+|---|:---:|:---:|---|
+| `ContestHealthControllerTest` | 1 | 1 | `GET /api/contest/health` response shape |
+| `ContestConfigControllerTest` | 7 | 3b | Valid config, 4-question constraint, duplicate slots, blank fields |
+| `ContestIngestControllerTest` | 8 | 4 | Valid ingest, `LOGIN_WALL`, `SELECTOR_NOT_FOUND`, invalid Q slot, blank `rawUsersAccepted` |
+| `AcceptanceStatsParserTest` | 40 | 5 | Plain integers, commas, K/M/B suffixes, float-drift regression, null/malformed error handling |
+| **Total** | **56** | — | **100% passing** |
+
+### Knowledge Artifacts (repo root)
+
+| File | Status |
+|---|---|
+| `CHANGELOG.md` | ✅ Current through Phase 5 |
+| `DECISIONS.md` | ✅ 13+ ADRs documented |
+| `FLOW.md` | ✅ Cross-process sequence diagram |
+| `DOCUMENTATION.md` | ✅ Setup, REST API contract, security notes |
+| `LEARN.md` | ✅ End-to-end trace + debugging index |
+
+---
+
+## What's Next (Phases 6–11)
+
+### Phase 6 — Four Questions + Concurrency
+**Lead:** Extension/Background Agent + Backend/Core Agent | **Reviewer:** Edge-Case Red Team
+- Wire `alarmScheduler.js` to run scrape cycle across all 4 background tabs sequentially
+- Wire `background.js` `SCRAPE_RESULT` handler to call `backendClient.postIngest` per question
+- Complete `ContestStateService.applyIngest` to call `AcceptanceStatsParser` + `AcceptanceCalculationService`
+- Add `AcceptanceCalculationService.java` (`percentage = acceptedUsers / totalUsers × 100`, `BigDecimal`)
+- Concurrency test: 4 simultaneous ingest calls → assert consistent `ContestStats` snapshot
+
+### Phase 7 — Alarm Scheduler
+**Lead:** Extension/Background Agent | **Reviewer:** Architect
+- `extension/background/alarmScheduler.js` — `chrome.alarms` 5-min cycle, `cycleInProgress` guard
+
+### Phase 8 — State + Ranking
+**Lead:** Backend/Core Agent | **Reviewer:** Edge-Case Red Team
+- Sort `ranking` list by `usersAcceptedPercentage` descending in `ContestStateService`
+- Publish via `AtomicReference.set(newSnapshot)` — lock-free reads on status endpoint
+
+### Phase 9 — Overtaking Detection
+**Lead:** Backend/Core Agent | **Reviewer:** Testing/QA Agent
+- `ComparisonService.java` — pairwise transition detection, tie handling, no duplicates
+- `ComparisonServiceTest.java` — overtake, no-duplicate, tie, all-equal scenarios
+
+### Phase 10 — Status/Health API + Side Panel UI
+**Lead:** REST API Agent + UI Agent | **Reviewer:** Architect
+- `ContestStatusController.java` — `GET /api/contest/status`
+- Full health payload in `ContestHealthController` (incl. `lastIngestReceivedAt` per question)
+- `extension/ui/sidepanel.html` / `sidepanel.js` / `sidepanel.css` — polls every 5s, backend-unreachable banner
+- `extension/ui/popup.html` / `popup.js`
+
+### Phase 11 — Robustness + Lifecycle
+**Lead:** Backend/Core + Extension/Background + Edge-Case Red Team | **Reviewer:** Architect
+- `ContestLifecycleService.java` — signal-based ENDED detection (3 unchanged cycles)
+- `TAB_MISSING` recovery in `tabLifecycleManager.js`
+- `extension/tests/tabLifecycle.test.js` + `backendClient.test.js` (Jest)
+- Final Edge-Case Red Team review
+
+---
+
+## How to Run
+
+### Start the Backend
+```bash
+cd backend
+mvn spring-boot:run
+# Starts on http://localhost:8080 (loopback only)
+```
+
+### Run Backend Tests
+```bash
+cd backend
+mvn test
+# Expected: 56 tests, 0 failures
+```
+
+### Load the Extension
+1. Open `chrome://extensions` → Enable **Developer Mode**
+2. **Load unpacked** → select `extension/` directory
+3. Note your 32-char extension ID
+4. Replace `PLACEHOLDER_EXTENSION_ID` in `backend/src/main/java/com/leetcode/monitor/config/CorsConfig.java`
+5. Generate a stable key for `manifest.json`:
+   ```bash
+   openssl genrsa 2048 | openssl pkcs8 -topk8 -nocrypt -out key.pem
+   openssl rsa -in key.pem -pubout -outform DER | openssl base64 -A
+   ```
+   Paste the output as the `"key"` value in `manifest.json`
+
+### Configure a Contest
+1. Click the extension icon → **Options**
+2. Enter a LeetCode contest URL (e.g. `https://leetcode.com/contest/weekly-contest-400/`)
+3. Click **Save** — discovery begins automatically
