@@ -60,3 +60,10 @@
 - Context: Project structure and modern JS.
 - Decision: Use `"type": "module"` in `manifest.json`.
 - Rationale: Allows static import of `tabLifecycleManager` and `backendClient`.
+
+## ADR-013: 3-Tier Selector Fallback Chain & 300ms Double-Read Stability Check
+- Context: Problem pages render asynchronously with React hydration; acceptance statistics markup can vary across UI updates.
+- Decision: Use a 3-tier fallback chain (1. Text-anchored, 2. Attribute-based, 3. Aria-label) combined with a MutationObserver and a 300ms double-read stability check before dispatching `SCRAPE_RESULT`.
+- Rationale: Prevents brittle selector breakage when LeetCode modifies utility class names while eliminating transient DOM hydration race conditions. Login walls and page errors are detected early to emit `LOGIN_WALL` or `PAGE_UNAVAILABLE` immediately.
+- Consequences: Content script dispatches stable, unparsed strings to background without float math drift.
+

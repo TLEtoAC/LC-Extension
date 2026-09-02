@@ -1,7 +1,7 @@
 /*
  * File: ContestStateService.java
  * Author: REST API Agent
- * Phase: Phase 3 — Backend: ContestConfigController + Model Classes
+ * Phase: Phase 4 — Backend: ContestIngestController & Ingest DTOs
  * Purpose: Central thread-safe state management service for active contest tracking and snapshot publishing.
  *
  * Concurrency & Architecture Notes:
@@ -12,6 +12,7 @@
 
 package com.leetcode.monitor.service;
 
+import com.leetcode.monitor.dto.ContestIngestRequest;
 import com.leetcode.monitor.model.ContestStats;
 import com.leetcode.monitor.model.Question;
 import com.leetcode.monitor.model.QuestionStats;
@@ -20,6 +21,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
@@ -73,6 +75,69 @@ public class ContestStateService {
 
         currentStats.set(newStats);
         logger.info("Contest state successfully initialized with lifecycleState=INITIALISED");
+    }
+
+    /**
+     * Updates question statistics with inbound scraped data and publishes an updated contest snapshot.
+     *
+     * Critical section: This method touches the critical section and is synchronized to guarantee that
+     * metric updates, ranking recalculations, and snapshot publishing are mutually exclusive and atomic.
+     *
+     * @param questionNumber the question slot identifier (e.g., "Q1", "Q2", "Q3", "Q4")
+     * @param request        the ingest payload containing scraping status and scraped statistics
+     * @return the updated {@link QuestionStats} for the target question
+     * @throws IllegalStateException    if no contest has been initialized
+     * @throws IllegalArgumentException if questionNumber does not match any configured question
+     * @throws NullPointerException     if questionNumber or request is null
+     */
+    public synchronized QuestionStats applyIngest(String questionNumber, ContestIngestRequest request) {
+        Objects.requireNonNull(questionNumber, "questionNumber cannot be null");
+        Objects.requireNonNull(request, "request cannot be null");
+
+        ContestStats current = currentStats.get();
+        if (current == null) {
+            logger.error("Cannot apply ingest for {}: contest has not been initialized", questionNumber);
+            throw new IllegalStateException("Contest has not been initialized");
+        }
+
+        logger.info("Applying ingest for question: {} with scrapingStatus: {}", questionNumber, request.getScrapingStatus());
+
+        List<QuestionStats> updatedQuestions = new ArrayList<>();
+        QuestionStats targetQuestionStats = null;
+
+        for (QuestionStats qs : current.getQuestions()) {
+            if (qs.getQuestionNumber().equalsIgnoreCase(questionNumber.trim())) {
+                qs.setTimestamp(Instant.now());
+                qs.setScrapingStatus(request.getScrapingStatus());
+                qs.setErrorMessage(request.getErrorMessage());
+                qs.setSelectorStrategyUsed(request.getSelectorStrategyUsed());
+                // In Phase 4, scraping metadata is stored; mathematical parsing and calculations are wired in Phase 5
+                targetQuestionStats = qs;
+            }
+            updatedQuestions.add(qs);
+        }
+
+        if (targetQuestionStats == null) {
+            logger.error("Question {} not found in active contest configuration", questionNumber);
+            throw new IllegalArgumentException("Question " + questionNumber + " not found in contest configuration");
+        }
+
+        String nextLifecycleState = "INITIALISED".equals(current.getLifecycleState()) ? "MONITORING" : current.getLifecycleState();
+
+        ContestStats updatedSnapshot = ContestStats.builder()
+                .contestUrl(current.getContestUrl())
+                .questions(updatedQuestions)
+                .ranking(current.getRanking())
+                .recentChanges(current.getRecentChanges())
+                .lastUpdated(Instant.now())
+                .lifecycleState(nextLifecycleState)
+                .pairwiseRelationships(current.getPairwiseRelationships())
+                .build();
+
+        currentStats.set(updatedSnapshot);
+        logger.info("Successfully applied ingest for {}. Snapshot updated with lifecycleState={}", questionNumber, nextLifecycleState);
+
+        return targetQuestionStats;
     }
 
     /**

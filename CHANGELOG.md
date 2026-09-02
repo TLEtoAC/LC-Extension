@@ -22,3 +22,14 @@
 - [x] ui/options.html / options.js
 - [x] package.json
 - [x] tests/httpBoundaryProof.md
+
+## Phase 3 — Contest Discovery Content Script (2026-08-17)
+**Lead:** Content Script/DOM Agent | **Reviewer:** Architect
+**Side:** extension/
+- [x] extension/content-scripts/contestPageScript.js
+
+## Phase 4 — Problem Page DOM Scraping Content Script (2026-09-03)
+**Lead:** Content Script/DOM Agent | **Reviewer:** Architect
+**Side:** extension/
+- [x] extension/content-scripts/problemPageScript.js
+
