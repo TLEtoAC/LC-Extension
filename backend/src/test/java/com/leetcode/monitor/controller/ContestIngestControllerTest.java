@@ -10,7 +10,10 @@ package com.leetcode.monitor.controller;
 import com.leetcode.monitor.dto.ContestIngestRequest;
 import com.leetcode.monitor.model.ContestStats;
 import com.leetcode.monitor.model.Question;
+import com.leetcode.monitor.model.QuestionStats;
 import com.leetcode.monitor.model.ScrapingStatus;
+import com.leetcode.monitor.parser.AcceptanceStatsParser;
+import com.leetcode.monitor.service.AcceptanceCalculationService;
 import com.leetcode.monitor.service.ContestStateService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -22,10 +25,12 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.test.web.servlet.MockMvc;
 
+import java.math.BigDecimal;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -77,12 +82,48 @@ public class ContestIngestControllerTest {
                 .andExpect(jsonPath("$.problemName").value("min-chairs"))
                 .andExpect(jsonPath("$.scrapingStatus").value("SUCCESS"))
                 .andExpect(jsonPath("$.selectorStrategyUsed").value("text-anchored"))
+                .andExpect(jsonPath("$.acceptedUsers").value(28903))
+                .andExpect(jsonPath("$.totalUsers").value(31100))
+                .andExpect(jsonPath("$.usersAcceptedPercentage").value(92.9356913183))
                 .andExpect(jsonPath("$.timestamp").isNotEmpty());
 
         ContestStats stats = contestStateService.getCurrentStats();
         assertNotNull(stats);
         assertEquals("MONITORING", stats.getLifecycleState());
-        assertEquals(ScrapingStatus.SUCCESS, stats.getQuestions().get(0).getScrapingStatus());
+        QuestionStats q1 = stats.getQuestions().get(0);
+        assertEquals(ScrapingStatus.SUCCESS, q1.getScrapingStatus());
+        assertEquals(0, new BigDecimal("28903").compareTo(q1.getAcceptedUsers()));
+        assertEquals(0, new BigDecimal("31100").compareTo(q1.getTotalUsers()));
+        assertEquals(0, new BigDecimal("92.9356913183").compareTo(q1.getUsersAcceptedPercentage()));
+    }
+
+    /**
+     * Zero totalUsers is PARSE_ERROR — never store 0%.
+     *
+     * @throws Exception if mockMvc request fails
+     */
+    @Test
+    public void testSuccessIngestWithZeroTotalUsersMarksParseError() throws Exception {
+        String json = """
+                {
+                  "rawUsersAccepted": "10 / 0",
+                  "scrapingStatus": "SUCCESS"
+                }
+                """;
+
+        mockMvc.perform(post("/api/contest/ingest/Q1")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.questionNumber").value("Q1"))
+                .andExpect(jsonPath("$.scrapingStatus").value("PARSE_ERROR"));
+
+        QuestionStats q1 = contestStateService.getCurrentStats().getQuestions().get(0);
+        assertEquals(ScrapingStatus.PARSE_ERROR, q1.getScrapingStatus());
+        assertNull(q1.getAcceptedUsers());
+        assertNull(q1.getTotalUsers());
+        assertNull(q1.getUsersAcceptedPercentage());
+        assertNotNull(q1.getErrorMessage());
     }
 
     /**
@@ -225,7 +266,10 @@ public class ContestIngestControllerTest {
      */
     @Test
     public void testIngestWhenContestNotConfiguredReturnsBadRequest() {
-        ContestStateService uninitializedService = new ContestStateService();
+        ContestStateService uninitializedService = new ContestStateService(
+                new AcceptanceStatsParser(),
+                new AcceptanceCalculationService()
+        );
         ContestIngestController controller = new ContestIngestController(uninitializedService);
         ContestIngestRequest request = new ContestIngestRequest("10 / 20", ScrapingStatus.SUCCESS);
         ResponseEntity<?> response = controller.ingestQuestion("Q1", request);
