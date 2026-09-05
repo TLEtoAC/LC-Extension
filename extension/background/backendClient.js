@@ -154,28 +154,49 @@ export async function postConfig(payload) {
  * null immediately without making a network request. Stale data is worthless;
  * the next alarm cycle will produce a fresh scrape.
  *
- * @param {number|string} questionNumber  1–4 identifying the problem slot.
+ * @param {number|string} questionNumber  Slot identifier. Accepts 1, "1", or "Q1";
+ *                                        the URL always uses Qn (Q1–Q4).
  * @param {object}        payload         Scraped data object. Serialised as JSON.
  * @returns {Promise<object|null>}
- *   Parsed response on success; null if unreachable or on error.
+ *   Parsed QuestionStats on success; null if unreachable or on error (ADR-009).
  * @sideeffects Reads and updates chrome.storage.local key "backendUnreachable".
  * @note Runs in the extension service worker context.
  */
 export async function postIngest(questionNumber, payload) {
+  const slot = normalizeQuestionSlot(questionNumber);
+
   // Drop-on-unreachable: read current flag before touching the network.
   const { backendUnreachable } = await chrome.storage.local.get('backendUnreachable');
   if (backendUnreachable) {
     console.warn(
-      `[backendClient] postIngest(Q${questionNumber}) dropped — backend is unreachable.`
+      `[backendClient] postIngest(${slot}) dropped — backend is unreachable.`
     );
     return null;
   }
 
-  return _fetch(`${BACKEND_BASE_URL}/api/contest/ingest/${questionNumber}`, {
+  return _fetch(`${BACKEND_BASE_URL}/api/contest/ingest/${slot}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
   });
+}
+
+/**
+ * Normalizes a question slot to the backend path form "Q1"–"Q4".
+ *
+ * Accepts 1, "1", "q1", or "Q1". Callers may pass either form; the ingest URL
+ * always uses Qn.
+ *
+ * @param {number|string} questionNumber
+ * @returns {string} Normalized slot, e.g. "Q1"
+ */
+export function normalizeQuestionSlot(questionNumber) {
+  const raw = String(questionNumber).trim().toUpperCase();
+  const match = raw.match(/^Q?([1-4])$/);
+  if (match) {
+    return `Q${match[1]}`;
+  }
+  return raw.startsWith('Q') ? raw : `Q${raw}`;
 }
 
 /**
