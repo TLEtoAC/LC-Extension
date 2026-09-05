@@ -75,7 +75,7 @@ sequenceDiagram
             API->>SVC: applyIngest (synchronized)
             SVC->>SVC: deep-copy QuestionStats
             SVC->>SVC: parse + calculatePercentage
-            SVC->>SVC: ranking = previous (TODO Phase 8)
+            SVC->>SVC: RankingService.computeRanking (desc %, null last)
             SVC->>SVC: overtakes = previous (TODO Phase 9)
             SVC->>REF: AtomicReference.set(newSnapshot)
             SVC-->>API: QuestionStats

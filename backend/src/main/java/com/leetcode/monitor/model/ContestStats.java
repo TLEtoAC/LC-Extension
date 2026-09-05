@@ -30,7 +30,8 @@ public final class ContestStats {
     private final List<QuestionStats> questions;
 
     /**
-     * Question numbers sorted in descending order of user acceptance percentage (empty list until first ingest).
+     * Question numbers sorted by usersAcceptedPercentage descending (highest first);
+     * null percentages last; ties by question number. Empty until first ingest.
      */
     private final List<String> ranking;
 
@@ -112,7 +113,7 @@ public final class ContestStats {
     /**
      * Gets the current ranking order of question identifiers.
      *
-     * @return the ranking list sorted descending by acceptance percentage
+     * @return the ranking list (highest acceptance first; null percentages last)
      */
     public List<String> getRanking() {
         return ranking;

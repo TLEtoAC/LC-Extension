@@ -47,7 +47,8 @@ Factual record of which LLM ran which council role in this repo, versus the pair
 | 5. Parser | Parser/Data | Testing/QA | Cursor Grok 4.6 (historical) |
 | 6. Four questions + concurrency | Extension/Background + Backend/Core | Edge-Case Red Team | **Cursor Grok 4.6** parent Architect + inherit subagents (explore, implementer covering Backend/Core, Extension/Background, Testing/QA, Logging/Docs, Edge-Case Red Team) |
 | 7. Alarm Scheduler | Extension/Background | Architect | **Cursor Grok 4.6** parent Architect + inherit Phase 7 implementer (Extension/Background lead; Architect review) |
-| 8–11 | See §31.2 | See §31.2 | Not run yet. Default remains Cursor Grok 4.6 until a session uses another model. |
+| 8. State + Ranking | Backend/Core | Edge-Case Red Team | **Cursor Grok 4.6** parent Architect + inherit implementer (Backend/Core + Testing/QA + Docs + Red Team) |
+| 9–11 | See §31.2 | See §31.2 | In progress this session. Default remains Cursor Grok 4.6. |
 
 ---
 
@@ -73,6 +74,15 @@ Also **Cursor Grok 4.6** (`inherit`):
 - Phase 7 implementer (Extension/Background lead; Architect review)
 
 Branch: `feat/phase7-alarm-polish` (from `feat/phase6-extension-scrape`).
+
+---
+
+## Phase 8–11 (this session)
+
+Also **Cursor Grok 4.6** (`inherit`):
+
+- Architect + Backend/Core + REST/UI + Testing + Docs + Edge-Case Red Team — simulated in one implementer
+- Branch: `feat/phases-8-11` (from `phase1` @ `8dbe9f8`)
 
 ---
 

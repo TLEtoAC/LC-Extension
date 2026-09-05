@@ -15,6 +15,7 @@ import com.leetcode.monitor.model.ScrapingStatus;
 import com.leetcode.monitor.parser.AcceptanceStatsParser;
 import com.leetcode.monitor.service.AcceptanceCalculationService;
 import com.leetcode.monitor.service.ContestStateService;
+import com.leetcode.monitor.service.RankingService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -268,7 +269,8 @@ public class ContestIngestControllerTest {
     public void testIngestWhenContestNotConfiguredReturnsBadRequest() {
         ContestStateService uninitializedService = new ContestStateService(
                 new AcceptanceStatsParser(),
-                new AcceptanceCalculationService()
+                new AcceptanceCalculationService(),
+                new RankingService()
         );
         ContestIngestController controller = new ContestIngestController(uninitializedService);
         ContestIngestRequest request = new ContestIngestRequest("10 / 20", ScrapingStatus.SUCCESS);

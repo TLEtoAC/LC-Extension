@@ -114,3 +114,9 @@
 - Decision: Export `stopMonitoringAlarm()` and `handleContestEnded()`. Wire a `CONTEST_ENDED` runtime message. Persist `monitoringStopped: true` so a service-worker restart does not recreate `scrapeCycle`. Do **not** invent ENDED detection in Phase 7.
 - Rationale: Inventing a 3-cycle detector in the extension would duplicate Phase 11 and could false-stop on a static mid-contest snapshot.
 - Consequences: Until Phase 11 calls `handleContestEnded()` (or sends `CONTEST_ENDED`), the alarm keeps running after a real contest ends. Phase 11 must invoke the hook when health/status reports ENDED.
+
+## ADR-022: Ranking Is Descending Acceptance Percentage
+- Context: The Architect prompt suggested ascending % (hardest = rank 1). The master plan is silent on sort order. Phase 3 `ContestStats` and PROGRESS already documented descending.
+- Decision: `ranking[]` is question numbers sorted by `usersAcceptedPercentage` **descending** (highest acceptance first). Ties break by question number ascending (`Q1` before `Q2`). Null percentages (PARSE_ERROR, NAVIGATION_TIMEOUT, not yet scraped) sort last and never throw.
+- Rationale: Matches the existing snapshot contract and the overtake language ("Q4 overtook Q3" = Q4's % moved above Q3's). `BigDecimal.compareTo` only.
+- Consequences: The dashboard "rank 1" is the easiest (highest %) question, not the hardest.

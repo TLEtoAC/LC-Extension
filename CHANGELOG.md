@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+## Phase 8 — State + Ranking (2026-09-05)
+**Lead:** Backend/Core Agent | **Reviewer:** Edge-Case Red Team
+**Side:** backend/
+- [x] RankingService.java — descending `usersAcceptedPercentage`, ties by question number, null % last (ADR-022)
+- [x] ContestStateService.applyIngest — ranking computed inside the same synchronized publish
+- [x] RankingServiceTest + ContestStateServiceRankingTest; concurrency test asserts ranking on the snapshot
+
 ## Phase 7 — Alarm Scheduler Polish (2026-09-05)
 **Lead:** Extension/Background Agent | **Reviewer:** Architect
 **Side:** extension/

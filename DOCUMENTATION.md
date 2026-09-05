@@ -86,10 +86,11 @@ Returns the latest ContestStats snapshot.
 {
   "lastUpdated": "2024-01-01T12:00:00Z",
   "questions": [ ... ],
-  "ranking": ["Q3", "Q1", "Q4", "Q2"],
+  "ranking": ["Q4", "Q2", "Q1", "Q3"],
   "recentChanges": [ { "description": "Q3 overtook Q1", "timestamp": "..." } ]
 }
 ```
+`ranking` is question numbers by `usersAcceptedPercentage` **descending** (highest first). Equal percentages break by question number (`Q1` before `Q2`). Slots with a null percentage (PARSE_ERROR, timeout, not yet scraped) are listed last. Empty until the first ingest.
 
 ### GET /api/contest/health
 ```json
@@ -143,6 +144,7 @@ Returns the latest ContestStats snapshot.
 | `ContestStatusController.java` | GET /api/contest/status |
 | `ContestHealthController.java` | GET /api/contest/health |
 | `ContestStateService.java` | Critical section, AtomicReference snapshot |
+| `RankingService.java` | Descending % ranking (null last, ties by Qn) |
 | `AcceptanceCalculationService.java` | BigDecimal percentage |
 | `ComparisonService.java` | Pairwise overtake detection |
 | `ContestLifecycleService.java` | Signal-based ENDED detection |

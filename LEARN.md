@@ -16,7 +16,8 @@ The Chrome extension scrapes raw "Users Accepted" strings from LeetCode and POST
 ### Backend Side
 - **`AcceptanceStatsParser.java`**: Converts `"28,903 / 31.1K"` to two `BigDecimal` values. Uses `BigDecimal` multiplication for K/M/B — never `double`.
 - **`AcceptanceCalculationService.java`**: `acceptedUsers × 100 / totalUsers`, scale 10, HALF_UP. Zero `totalUsers` throws — never store 0%.
-- **`ContestStateService.java`**: The heart of the backend. A `synchronized` method wraps deep-copy → parse → calculate → ranking stub (Phase 8) → overtake stub (Phase 9) → `AtomicReference.set()`. This is the only place a new `ContestStats` snapshot is published.
+- **`ContestStateService.java`**: The heart of the backend. A `synchronized` method wraps deep-copy → parse → calculate → `RankingService.computeRanking` → overtake stub (Phase 9) → `AtomicReference.set()`. This is the only place a new `ContestStats` snapshot is published.
+- **`RankingService.java`**: Ranks Q1–Q4 by `usersAcceptedPercentage` descending (ADR-022). Ties by question number. Null percentages last. No I/O; called only from the critical section.
 - **`ComparisonService.java`**: Compares all pairs (Qi, Qj). Only emits a `RankingChange` when a relationship flips (e.g., Q3 was below Q1, now above). Handles ties.
 - **`ContestLifecycleService.java`**: Phase 11 — watches for 3 consecutive unchanged cycles across all 4 questions → marks contest ENDED. The extension already has `handleContestEnded()` (Phase 7) waiting for that signal.
 
@@ -60,7 +61,7 @@ Follow a single value from cycle start to snapshot:
      - `AcceptanceCalculationService.calculatePercentage(28903, 31100)` → `92.9356913183`
      - `ParseException` or zero-total `IllegalArgumentException` → `PARSE_ERROR`, metrics nulled
    - Non-SUCCESS (incl. `NAVIGATION_TIMEOUT`): clear metric fields, keep extension status
-   - TODO(Phase 8): `ranking = previous.getRanking()`
+   - `RankingService.computeRanking(updatedQuestions)` — descending %, null last (ADR-022)
    - TODO(Phase 9): `recentChanges` / `pairwiseRelationships` copied
    - `currentStats.set(newSnapshot)`
    - **Critical section ends**

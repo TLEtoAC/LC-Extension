@@ -1,9 +1,9 @@
 /*
  * File: ContestStateService.java
  * Author: Backend/Core Agent
- * Phase: Phase 6 — Four Questions + Concurrency
+ * Phase: Phase 8 — State + Ranking
  * Purpose: Central thread-safe state management. applyIngest wraps parse → calculate →
- *          ranking stub → overtake stub → snapshot publish in a single synchronized critical section.
+ *          recompute ranking → overtake stub → snapshot publish in a single synchronized critical section.
  *
  * Concurrency & Architecture Notes:
  * This class owns the ContestStateService critical section per Section 7A-2 / ADR-003.
@@ -49,18 +49,22 @@ public class ContestStateService {
     private final AtomicReference<ContestStats> currentStats = new AtomicReference<>();
     private final AcceptanceStatsParser acceptanceStatsParser;
     private final AcceptanceCalculationService acceptanceCalculationService;
+    private final RankingService rankingService;
 
     /**
-     * Constructs the service with parser and percentage calculator.
+     * Constructs the service with parser, percentage calculator, and ranking.
      *
      * @param acceptanceStatsParser         parser for raw acceptance strings
      * @param acceptanceCalculationService  BigDecimal percentage calculator
+     * @param rankingService                ranks questions by acceptance percentage
      */
     public ContestStateService(
             AcceptanceStatsParser acceptanceStatsParser,
-            AcceptanceCalculationService acceptanceCalculationService) {
+            AcceptanceCalculationService acceptanceCalculationService,
+            RankingService rankingService) {
         this.acceptanceStatsParser = acceptanceStatsParser;
         this.acceptanceCalculationService = acceptanceCalculationService;
+        this.rankingService = rankingService;
     }
 
     /**
@@ -104,7 +108,7 @@ public class ContestStateService {
      * Updates question statistics with inbound scraped data and publishes an updated contest snapshot.
      *
      * <p>Critical section: method-level {@code synchronized} wraps the full compound transition
-     * (deep-copy → apply ingest → parse/calculate → ranking stub → overtake stub → publish).
+     * (deep-copy → apply ingest → parse/calculate → recompute ranking → overtake stub → publish).
      * AtomicReference alone is not sufficient (ADR-003).</p>
      *
      * @param questionNumber the question slot identifier (e.g., "Q1", "Q2", "Q3", "Q4")
@@ -145,8 +149,8 @@ public class ContestStateService {
 
         String nextLifecycleState = "INITIALISED".equals(previous.getLifecycleState()) ? "MONITORING" : previous.getLifecycleState();
 
-        // TODO(Phase 8): recompute ranking from usersAcceptedPercentage descending
-        List<String> ranking = previous.getRanking();
+        // Ranking is part of the same synchronized publish (Section 7A-2 / ADR-022).
+        List<String> ranking = rankingService.computeRanking(updatedQuestions);
 
         // TODO(Phase 9): compute overtakes / pairwiseRelationships from previous vs new snapshot
         List<RankingChange> recentChanges = previous.getRecentChanges();

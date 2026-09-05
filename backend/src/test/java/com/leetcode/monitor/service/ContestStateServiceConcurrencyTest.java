@@ -78,6 +78,7 @@ class ContestStateServiceConcurrencyTest {
         assertSlot(bySlot.get("Q2"), "count-days", ScrapingStatus.SUCCESS, "300", "400", "75");
         assertSlot(bySlot.get("Q3"), "smallest-string", ScrapingStatus.SUCCESS, "50", "100", "50");
         assertSlot(bySlot.get("Q4"), "bitwise-and", ScrapingStatus.SUCCESS, "28903", "31100", "92.9356913183");
+        assertEquals(List.of("Q4", "Q2", "Q1", "Q3"), snapshot.getRanking());
     }
 
     @Test
@@ -126,6 +127,7 @@ class ContestStateServiceConcurrencyTest {
         assertSlot(bySlot.get("Q2"), "count-days", ScrapingStatus.SUCCESS, "300", "400", "75");
         assertSlot(bySlot.get("Q3"), "smallest-string", ScrapingStatus.SUCCESS, "50", "100", "50");
         assertSlot(bySlot.get("Q4"), "bitwise-and", ScrapingStatus.SUCCESS, "28903", "31100", "92.9356913183");
+        assertEquals(List.of("Q4", "Q2", "Q3", "Q1"), contestStateService.getCurrentStats().getRanking());
     }
 
     @Test
@@ -195,6 +197,7 @@ class ContestStateServiceConcurrencyTest {
         assertSlot(bySlot.get("Q2"), "count-days", ScrapingStatus.SUCCESS, "300", "400", "75");
         assertSlot(bySlot.get("Q3"), "smallest-string", ScrapingStatus.SUCCESS, "50", "100", "50");
         assertSlot(bySlot.get("Q4"), "bitwise-and", ScrapingStatus.SUCCESS, "28903", "31100", "92.9356913183");
+        assertEquals(List.of("Q4", "Q2", "Q1", "Q3"), finalSnapshot.getRanking());
     }
 
     private record Ingest(String questionNumber, String raw) {
@@ -267,5 +270,46 @@ class ContestStateServiceConcurrencyTest {
                 torn.set(true);
             }
         }
+        if (!rankingMatchesPercentages(snapshot)) {
+            torn.set(true);
+        }
+    }
+
+    /**
+     * Ranking on a published snapshot must list percentage-bearing slots first
+     * (descending), then null-percentage slots. A mismatch means ranking was
+     * published separately from the question list.
+     */
+    private static boolean rankingMatchesPercentages(ContestStats snapshot) {
+        List<QuestionStats> questions = snapshot.getQuestions();
+        List<String> ranking = snapshot.getRanking();
+        if (ranking.isEmpty()) {
+            return questions.stream().allMatch(qs -> qs.getUsersAcceptedPercentage() == null);
+        }
+        if (ranking.size() != questions.size()) {
+            return false;
+        }
+        Map<String, QuestionStats> bySlot = indexBySlot(snapshot);
+        BigDecimal lastPct = null;
+        boolean seenNull = false;
+        for (String slot : ranking) {
+            QuestionStats qs = bySlot.get(slot);
+            if (qs == null) {
+                return false;
+            }
+            BigDecimal pct = qs.getUsersAcceptedPercentage();
+            if (pct == null) {
+                seenNull = true;
+                continue;
+            }
+            if (seenNull) {
+                return false;
+            }
+            if (lastPct != null && lastPct.compareTo(pct) < 0) {
+                return false;
+            }
+            lastPct = pct;
+        }
+        return true;
     }
 }
