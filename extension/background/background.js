@@ -8,7 +8,7 @@
  *           tabLifecycleManager.js, alarmScheduler.js, and backendClient.js.
  *
  * Author  : Extension/Background Agent
- * Phase   : 3 (Discovery Wiring Complete)
+ * Phase   : 6 (Four Questions + Concurrency)
  *
  * Context : Runs exclusively in the Chrome Extension Service Worker context.
  *           The service worker may be suspended and restarted at any time by
@@ -34,8 +34,14 @@ import {
   checkHealth,
   postConfig,
   postIngest,
-  getStatus
+  getStatus,
+  normalizeQuestionSlot
 } from './backendClient.js';
+import {
+  registerMonitoringAlarm,
+  runScrapeCycle,
+  resolvePendingScrape
+} from './alarmScheduler.js';
 
 // ─── onInstalled ─────────────────────────────────────────────────────────────
 
@@ -166,6 +172,15 @@ async function handleDiscoveryComplete(message, sender, sendResponse) {
     );
 
     sendResponse({ ok: true, tabIds });
+
+    // 6. Immediate first cycle + 5-minute alarm (Architect: do both after discovery).
+    // Discovery already replied so a cycle failure must not re-sendResponse.
+    try {
+      await registerMonitoringAlarm();
+      await runScrapeCycle();
+    } catch (cycleErr) {
+      console.error('[background] Immediate scrape cycle failed:', cycleErr);
+    }
   } catch (err) {
     console.error('[background] Error handling DISCOVERY_COMPLETE:', err);
     sendResponse({ ok: false, error: err.message });
@@ -286,8 +301,8 @@ async function handleDiscoveryFailed(message, sender, sendResponse) {
  *   DISCOVERY_COMPLETE      — Phase 3: persist discovered questions, config backend, open Q1–Q4 tabs
  *   CLICK_AND_CAPTURE_START — Phase 3: capture navigation URL for click-and-capture fallback
  *   DISCOVERY_FAILED        — Phase 3: record discovery failure status
- *   SCRAPE_RESULT           — Phase 5: receive scraped data from content script
- *   OPEN_SIDE_PANEL         — Phase 6: open the side panel
+ *   SCRAPE_RESULT           — Phase 6: postIngest + resolve pending scrape
+ *   OPEN_SIDE_PANEL         — Phase 10: open the side panel
  *
  * @param {object} message         The message object sent by the caller.
  * @param {string} message.type    Identifies the message kind.
@@ -317,9 +332,7 @@ function onMessage(message, sender, sendResponse) {
       break;
 
     case 'SCRAPE_RESULT':
-      // Phase 5: handleScrapeResult(message, sendResponse);
-      console.log('[background] SCRAPE_RESULT received — handler wired in Phase 5.');
-      sendResponse({ ok: true });
+      handleScrapeResult(message, sender, sendResponse);
       break;
 
     case 'OPEN_SIDE_PANEL':
@@ -343,12 +356,107 @@ chrome.runtime.onMessage.addListener(onMessage);
 // ─── onAlarm ─────────────────────────────────────────────────────────────────
 
 /**
+ * Handles a SCRAPE_RESULT from problemPageScript.js.
+ * Maps the sender tab (or URL fallback) to Q1–Q4, POSTs ingest, then
+ * resolves any pending scrape wait so runScrapeCycle can advance.
+ * Only this handler posts real scrapes; the 20s waiter posts NAVIGATION_TIMEOUT.
+ *
+ * @param {object} message
+ * @param {chrome.runtime.MessageSender} sender
+ * @param {function} sendResponse
+ * @returns {Promise<void>}
+ * @note Runs in the extension service worker context.
+ */
+async function handleScrapeResult(message, sender, sendResponse) {
+  try {
+    const questionNumber = await deriveQuestionNumber(sender, message);
+    if (!questionNumber) {
+      console.warn(
+        `[background] SCRAPE_RESULT from unmapped tab id=${sender?.tab?.id} url=${message?.url}`
+      );
+      sendResponse({ ok: false, error: 'UNKNOWN_TAB' });
+      return;
+    }
+
+    const payload = {
+      rawUsersAccepted: message.rawUsersAccepted ?? null,
+      scrapingStatus: message.scrapingStatus,
+      selectorStrategyUsed: message.selectorStrategyUsed ?? null,
+      errorMessage: message.errorMessage ?? null
+    };
+
+    let ingestResult = null;
+    try {
+      ingestResult = await postIngest(questionNumber, payload);
+    } catch (err) {
+      console.error(`[background] postIngest failed for ${questionNumber}:`, err);
+    }
+
+    const tabIds = await getPersistedTabIds();
+    const tabId = sender?.tab?.id ?? tabIds[questionNumber];
+    if (tabId != null) {
+      resolvePendingScrape(tabId);
+    }
+
+    sendResponse({ ok: true, ingestResult });
+  } catch (err) {
+    console.error('[background] handleScrapeResult failed:', err);
+    sendResponse({ ok: false, error: err?.message ?? 'UNKNOWN_ERROR' });
+  }
+}
+
+/**
+ * Maps a scrape sender to Q1–Q4: inverted tabIds first, then discoveredQuestions URL.
+ *
+ * @param {chrome.runtime.MessageSender} sender
+ * @param {object} message
+ * @returns {Promise<string|null>}
+ */
+async function deriveQuestionNumber(sender, message) {
+  const tabIds = await getPersistedTabIds();
+  const senderTabId = sender?.tab?.id;
+  if (senderTabId != null) {
+    for (const slot of ['Q1', 'Q2', 'Q3', 'Q4']) {
+      if (tabIds[slot] === senderTabId) {
+        return slot;
+      }
+    }
+  }
+
+  const { discoveredQuestions } = await chrome.storage.local.get('discoveredQuestions');
+  const observedUrl = message?.url;
+  if (observedUrl && Array.isArray(discoveredQuestions)) {
+    const match = discoveredQuestions.find((q) => urlsLooselyMatch(q.problemUrl, observedUrl));
+    if (match?.questionNumber) {
+      return normalizeQuestionSlot(match.questionNumber);
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Compares configured problemUrl to the live tab URL (ignore query + trailing slash).
+ *
+ * @param {string} configured
+ * @param {string} observed
+ * @returns {boolean}
+ */
+function urlsLooselyMatch(configured, observed) {
+  if (!configured || !observed) {
+    return false;
+  }
+  const normalize = (u) => String(u).split('?')[0].replace(/\/$/, '');
+  const a = normalize(configured);
+  const b = normalize(observed);
+  return a === b || b.startsWith(a) || a.startsWith(b);
+}
+
+/**
  * Handles chrome.alarms events.
  *
- * Phase 7 will replace the stub body with the full scrape-cycle orchestration.
- * The `cycleInProgress` guard (persisted to chrome.storage.local — NOT
- * in-memory) prevents overlapping cycles if an alarm fires while a previous
- * scrape is still running.
+ * scrapeCycle: skip if a cycle is already in progress (storage-backed guard),
+ * otherwise run Q1→Q4. First cycle is also started immediately after discovery.
  *
  * @param {chrome.alarms.Alarm} alarm  The alarm that fired.
  * @returns {Promise<void>}
@@ -358,16 +466,13 @@ async function onAlarm(alarm) {
   console.log(`[background] onAlarm → name="${alarm.name}"`);
 
   if (alarm.name === 'scrapeCycle') {
-    // cycleInProgress is read from chrome.storage.local (NOT in-memory) so
-    // this guard survives service worker restarts between alarm fires.
     const inProgress = await getCycleInProgress();
     if (inProgress) {
       console.log('[background] Scrape cycle already in progress — skipping alarm.');
       return;
     }
 
-    // Phase 7: await runScrapeCycle();
-    console.log('[background] scrapeCycle alarm fired — full handler wired in Phase 7.');
+    await runScrapeCycle();
   }
 }
 
