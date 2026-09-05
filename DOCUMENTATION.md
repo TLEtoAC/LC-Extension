@@ -30,7 +30,8 @@ Update the `EXTENSION_ORIGIN` constant in `backend/src/main/java/com/leetcode/mo
 ### 4. Configure the Contest URL
 1. Click the extension icon → options page
 2. Enter the LeetCode contest URL (e.g. `https://leetcode.com/contest/weekly-contest-400/`)
-3. Click Save — discovery begins automatically
+3. Optionally set the monitoring interval (default 5 minutes, allowed 1–60)
+4. Click Save — discovery begins automatically when the contest URL is new or changed. After the 4 problem tabs open, the extension runs one scrape cycle immediately and registers `scrapeCycle` at the saved interval. Changing only the interval re-registers the alarm; it does not re-run discovery.
 
 ## Architecture
 
@@ -54,13 +55,30 @@ Registers contest metadata after discovery.
 ```
 
 ### POST /api/contest/ingest/{questionNumber}
-Called once per question per monitoring cycle.
+Called once per question per monitoring cycle. Path slot is `Q1`–`Q4` (the extension normalizes `1` / `"Q1"` to `Qn`).
+
+Request:
 ```json
 // On success:
 { "rawUsersAccepted": "28,903 / 31.1K", "scrapingStatus": "SUCCESS", "selectorStrategyUsed": "text-anchored" }
-// On failure:
-{ "scrapingStatus": "LOGIN_WALL" }
+// On scrape failure / timeout:
+{ "scrapingStatus": "NAVIGATION_TIMEOUT", "rawUsersAccepted": null, "errorMessage": "Scrape timed out after 20000ms for Q1" }
 ```
+
+Response `200` — updated `QuestionStats`:
+```json
+{
+  "questionNumber": "Q1",
+  "problemName": "min-chairs",
+  "acceptedUsers": 28903,
+  "totalUsers": 31100,
+  "usersAcceptedPercentage": 92.9356913183,
+  "scrapingStatus": "SUCCESS",
+  "selectorStrategyUsed": "text-anchored",
+  "timestamp": "2026-09-05T06:55:00Z"
+}
+```
+SUCCESS with unparseable text or `totalUsers == 0` still returns 200; `scrapingStatus` is `PARSE_ERROR` and the three metric fields are `null`.
 
 ### GET /api/contest/status
 Returns the latest ContestStats snapshot.
@@ -107,15 +125,15 @@ Returns the latest ContestStats snapshot.
 ### Extension
 | File | Purpose |
 |---|---|
-| `background/background.js` | Service worker entry point |
+| `background/background.js` | Service worker — discovery, ingest, interval re-register, `CONTEST_ENDED` hook, SW alarm restore |
 | `background/tabLifecycleManager.js` | 4-tab persistence, reload cycle, recovery |
-| `background/alarmScheduler.js` | 5-minute alarm, cycleInProgress guard |
-| `background/backendClient.js` | HTTP client for all backend calls |
+| `background/alarmScheduler.js` | Configurable `scrapeCycle` (default 5 min, clamp 1–60); `runScrapeCycle` Q1→Q4; `stopMonitoringAlarm` / `handleContestEnded` Phase 11 hook; 20s `NAVIGATION_TIMEOUT` |
+| `background/backendClient.js` | HTTP client; `postIngest` normalizes slot to `Qn` |
 | `content-scripts/contestPageScript.js` | Contest homepage discovery |
 | `content-scripts/problemPageScript.js` | Problem page scraping |
 | `ui/sidepanel.html/js/css` | Dashboard, polls backend every 5s |
 | `ui/popup.html/js` | Lightweight fallback |
-| `ui/options.html/js` | Contest URL configuration |
+| `ui/options.html/js` | Contest URL + scrape interval (1–60 min) |
 
 ### Backend
 | File | Purpose |
@@ -130,3 +148,8 @@ Returns the latest ContestStats snapshot.
 | `ContestLifecycleService.java` | Signal-based ENDED detection |
 | `AcceptanceStatsParser.java` | Raw string → BigDecimal |
 | `CorsConfig.java` | CORS restricted to extension origin |
+
+### Repo root
+| File | Purpose |
+|---|---|
+| `models.md` | Agent Council role → plan model vs the model that actually ran |

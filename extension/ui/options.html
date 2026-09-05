@@ -75,7 +75,8 @@
     }
 
     input[type="url"],
-    input[type="text"] {
+    input[type="text"],
+    input[type="number"] {
       width: 100%;
       padding: 10px 12px;
       background: var(--bg);
@@ -88,8 +89,13 @@
     }
 
     input[type="url"]:focus,
-    input[type="text"]:focus {
+    input[type="text"]:focus,
+    input[type="number"]:focus {
       border-color: var(--accent);
+    }
+
+    .field + .field {
+      margin-top: 18px;
     }
 
     .hint {
@@ -175,15 +181,30 @@
     <div class="card">
       <h2>Contest Settings</h2>
 
-      <label for="contestUrlInput">Contest URL</label>
-      <input
-        type="url"
-        id="contestUrlInput"
-        placeholder="https://leetcode.com/contest/weekly-contest-123/"
-        autocomplete="off"
-        spellcheck="false"
-      />
-      <p class="hint">Must start with <code>https://leetcode.com/contest/</code></p>
+      <div class="field">
+        <label for="contestUrlInput">Contest URL</label>
+        <input
+          type="url"
+          id="contestUrlInput"
+          placeholder="https://leetcode.com/contest/weekly-contest-123/"
+          autocomplete="off"
+          spellcheck="false"
+        />
+        <p class="hint">Must start with <code>https://leetcode.com/contest/</code></p>
+      </div>
+
+      <div class="field">
+        <label for="intervalInput">Monitoring interval (minutes)</label>
+        <input
+          type="number"
+          id="intervalInput"
+          min="1"
+          max="60"
+          step="1"
+          value="5"
+        />
+        <p class="hint">Default 5. Allowed range 1–60 (Chrome alarms cannot fire more often than once per minute).</p>
+      </div>
 
       <div class="actions">
         <button id="saveBtn">Save</button>

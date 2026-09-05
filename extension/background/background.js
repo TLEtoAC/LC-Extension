@@ -8,7 +8,7 @@
  *           tabLifecycleManager.js, alarmScheduler.js, and backendClient.js.
  *
  * Author  : Extension/Background Agent
- * Phase   : 6 (Four Questions + Concurrency)
+ * Phase   : 7 (Alarm Scheduler polish — interval config + ENDED stop)
  *
  * Context : Runs exclusively in the Chrome Extension Service Worker context.
  *           The service worker may be suspended and restarted at any time by
@@ -38,9 +38,15 @@ import {
   normalizeQuestionSlot
 } from './backendClient.js';
 import {
+  ALARM_NAME,
   registerMonitoringAlarm,
+  updateMonitoringInterval,
   runScrapeCycle,
-  resolvePendingScrape
+  resolvePendingScrape,
+  handleContestEnded,
+  ensureMonitoringAlarm,
+  recoverOrphanedCycleGuard,
+  isMonitoringStopped
 } from './alarmScheduler.js';
 
 // ─── onInstalled ─────────────────────────────────────────────────────────────
@@ -67,6 +73,8 @@ function onInstalled(details) {
       tabIds: { Q1: null, Q2: null, Q3: null, Q4: null },
       cycleInProgress: false,
       backendUnreachable: false,
+      monitoringIntervalMinutes: 5,
+      monitoringStopped: false,
     });
   } else if (details.reason === 'update') {
     console.log(`[background] Extension updated to v${chrome.runtime.getManifest().version}.`);
@@ -173,7 +181,7 @@ async function handleDiscoveryComplete(message, sender, sendResponse) {
 
     sendResponse({ ok: true, tabIds });
 
-    // 6. Immediate first cycle + 5-minute alarm (Architect: do both after discovery).
+    // 6. Immediate first cycle + alarm at the stored interval (default 5 min).
     // Discovery already replied so a cycle failure must not re-sendResponse.
     try {
       await registerMonitoringAlarm();
@@ -287,6 +295,45 @@ async function handleDiscoveryFailed(message, sender, sendResponse) {
   sendResponse({ ok: true });
 }
 
+/**
+ * Handles MONITORING_INTERVAL_SAVED from options.js.
+ * Persists the clamped interval and re-registers scrapeCycle when monitoring
+ * is already active. Does not start a scrape cycle (ADR-020).
+ *
+ * @param {object} message
+ * @param {number} message.periodMinutes
+ * @param {chrome.runtime.MessageSender} sender
+ * @param {function} sendResponse
+ * @returns {Promise<void>}
+ */
+async function handleMonitoringIntervalSaved(message, sender, sendResponse) {
+  try {
+    const period = await updateMonitoringInterval(message.periodMinutes);
+    sendResponse({ ok: true, periodMinutes: period });
+  } catch (err) {
+    console.error('[background] MONITORING_INTERVAL_SAVED failed:', err);
+    sendResponse({ ok: false, error: err?.message ?? 'UNKNOWN_ERROR' });
+  }
+}
+
+/**
+ * Phase 11 call site: stop scrapeCycle when lifecycle becomes ENDED.
+ *
+ * ContestLifecycleService (Phase 11, ADR-006) will detect ENDED (3 unchanged
+ * cycles) and surface it on health/status. Until then nothing produces ENDED —
+ * do not invent detection here. Phase 11 should send { type: 'CONTEST_ENDED' }
+ * or import handleContestEnded() from alarmScheduler.js.
+ *
+ * @param {object} message
+ * @param {chrome.runtime.MessageSender} sender
+ * @param {function} sendResponse
+ * @returns {Promise<void>}
+ */
+async function handleContestEndedMessage(message, sender, sendResponse) {
+  await handleContestEnded(message?.source ?? 'CONTEST_ENDED');
+  sendResponse({ ok: true });
+}
+
 // ─── onMessage ───────────────────────────────────────────────────────────────
 
 /**
@@ -297,12 +344,14 @@ async function handleDiscoveryFailed(message, sender, sendResponse) {
  * async responses (required when any handler is async).
  *
  * Supported message types:
- *   CONTEST_URL_SAVED       — Phase 3: trigger tab discovery & open contest tab
- *   DISCOVERY_COMPLETE      — Phase 3: persist discovered questions, config backend, open Q1–Q4 tabs
- *   CLICK_AND_CAPTURE_START — Phase 3: capture navigation URL for click-and-capture fallback
- *   DISCOVERY_FAILED        — Phase 3: record discovery failure status
- *   SCRAPE_RESULT           — Phase 6: postIngest + resolve pending scrape
- *   OPEN_SIDE_PANEL         — Phase 10: open the side panel
+ *   CONTEST_URL_SAVED         — Phase 3: trigger tab discovery & open contest tab
+ *   DISCOVERY_COMPLETE        — Phase 3: persist discovered questions, config backend, open Q1–Q4 tabs
+ *   CLICK_AND_CAPTURE_START   — Phase 3: capture navigation URL for click-and-capture fallback
+ *   DISCOVERY_FAILED          — Phase 3: record discovery failure status
+ *   MONITORING_INTERVAL_SAVED — Phase 7: persist interval and re-register scrapeCycle
+ *   CONTEST_ENDED             — Phase 11 hook: clear scrapeCycle (handleContestEnded)
+ *   SCRAPE_RESULT             — Phase 6: postIngest + resolve pending scrape
+ *   OPEN_SIDE_PANEL           — Phase 10: open the side panel
  *
  * @param {object} message         The message object sent by the caller.
  * @param {string} message.type    Identifies the message kind.
@@ -329,6 +378,14 @@ function onMessage(message, sender, sendResponse) {
 
     case 'DISCOVERY_FAILED':
       handleDiscoveryFailed(message, sender, sendResponse);
+      break;
+
+    case 'MONITORING_INTERVAL_SAVED':
+      handleMonitoringIntervalSaved(message, sender, sendResponse);
+      break;
+
+    case 'CONTEST_ENDED':
+      handleContestEndedMessage(message, sender, sendResponse);
       break;
 
     case 'SCRAPE_RESULT':
@@ -455,8 +512,9 @@ function urlsLooselyMatch(configured, observed) {
 /**
  * Handles chrome.alarms events.
  *
- * scrapeCycle: skip if a cycle is already in progress (storage-backed guard),
- * otherwise run Q1→Q4. First cycle is also started immediately after discovery.
+ * scrapeCycle: skip if monitoring was stopped (ENDED) or a cycle is already
+ * in progress (storage-backed guard), otherwise run Q1→Q4. First cycle is
+ * also started immediately after discovery.
  *
  * @param {chrome.alarms.Alarm} alarm  The alarm that fired.
  * @returns {Promise<void>}
@@ -465,7 +523,13 @@ function urlsLooselyMatch(configured, observed) {
 async function onAlarm(alarm) {
   console.log(`[background] onAlarm → name="${alarm.name}"`);
 
-  if (alarm.name === 'scrapeCycle') {
+  if (alarm.name === ALARM_NAME) {
+    if (await isMonitoringStopped()) {
+      console.log('[background] scrapeCycle fired after ENDED — clearing leftover alarm.');
+      await handleContestEnded('stale-alarm');
+      return;
+    }
+
     const inProgress = await getCycleInProgress();
     if (inProgress) {
       console.log('[background] Scrape cycle already in progress — skipping alarm.');
@@ -482,13 +546,17 @@ chrome.alarms.onAlarm.addListener(onAlarm);
 
 /**
  * Runs once each time the service worker starts (including restarts).
- * Pings the backend so the UI can show a "backend unreachable" warning early.
+ * Pings the backend, clears an orphaned cycleInProgress left by a mid-cycle
+ * SW death, and restores scrapeCycle if monitoring is still active.
+ * Does not start a scrape cycle on restart (that would double-fire).
  *
  * @returns {Promise<void>}
  * @note Runs in the extension service worker context.
  */
 async function runStartupChecks() {
   console.log('[background] Service worker started — running startup checks.');
+  await recoverOrphanedCycleGuard();
+  await ensureMonitoringAlarm();
   await checkHealth();
 }
 

@@ -9,7 +9,7 @@
 
 | Component | Status |
 |---|---|
-| Backend (`mvn test`) | ✅ **56 / 56 tests passing** |
+| Backend (`mvn test`) | ✅ **64 / 64 tests passing** |
 | Extension (syntax check) | ✅ All JS files pass `node --check` |
 | GitHub (`origin/phase1`) | ✅ Latest commit: `5c0ea2e` |
 
@@ -26,8 +26,8 @@
 | 3c | background.js discovery wiring | Extension/Background Agent | ✅ Done | `5c0ea2e` |
 | 4 | Single-Q Scraping — `problemPageScript.js` + `ContestIngestController` | Content Script/DOM + REST API Agents | ✅ Done | `5c0ea2e` |
 | 5 | Parser Hardening — `AcceptanceStatsParser` + BigDecimal tests | Parser/Data Agent + Testing/QA Agent | ✅ Done | files present, 40 parser tests passing |
-| 6 | Four Questions + Concurrency | Extension/Background + Backend/Core Agents | 🔲 Pending | — |
-| 7 | Alarm Scheduler | Extension/Background Agent | 🔲 Pending | — |
+| 6 | Four Questions + Concurrency | Extension/Background + Backend/Core Agents | ✅ Done | alarm + first cycle pulled into this phase (ADR-015) |
+| 7 | Alarm Scheduler | Extension/Background Agent | ✅ Done | Interval 1–60 + ENDED hook (`feat/phase7-alarm-polish`); core loop was Phase 6 (ADR-015) |
 | 8 | State + Ranking | Backend/Core Agent | 🔲 Pending | — |
 | 9 | Overtaking Detection | Backend/Core Agent | 🔲 Pending | — |
 | 10 | Status/Health API + Side Panel UI | REST API + UI Agents | 🔲 Pending | — |
@@ -36,7 +36,7 @@
 
 ---
 
-## Files Implemented (as of 2026-09-03)
+## Files Implemented (as of 2026-09-05)
 
 ### Extension (`extension/`)
 
@@ -44,13 +44,14 @@
 |---|:---:|---|
 | `manifest.json` | 2 | MV3 manifest — permissions, side panel, content script patterns, key placeholder |
 | `package.json` | 2 | Jest ^29 test config |
-| `background/background.js` | 2 / 3c | Service worker entry — message router, alarm handler, discovery wiring, 4-tab setup |
+| `background/background.js` | 2 / 3c / 6 / 7 | Service worker — discovery, ingest, interval re-register, `CONTEST_ENDED` hook, SW alarm restore |
 | `background/tabLifecycleManager.js` | 2 | Tab persistence (storage-backed), event-driven reload (`chrome.tabs.onUpdated`), `cycleInProgress` guard |
-| `background/backendClient.js` | 2 | `fetch()` wrapper — `checkHealth`, `postConfig`, `postIngest` (drop-on-unreachable), `getStatus` |
+| `background/alarmScheduler.js` | 6 / 7 | Configurable `scrapeCycle`; `runScrapeCycle`; `stopMonitoringAlarm` / `handleContestEnded`; 20s timeout |
+| `background/backendClient.js` | 2 / 6 | `fetch()` wrapper — `postIngest` normalizes `1`/`Q1` → `/ingest/Qn` |
 | `content-scripts/contestPageScript.js` | 3a | Contest homepage discovery — `MutationObserver`, href-first + click-and-capture fallback, 5 selector strategies |
 | `content-scripts/problemPageScript.js` | 4 | Problem page scraper — `MutationObserver`, 3-tier selector chain, double-read stability, login-wall & 404 detection |
-| `ui/options.html` | 2 | Contest URL input page |
-| `ui/options.js` | 2 | URL validation, `chrome.storage.local` persistence, sends `CONTEST_URL_SAVED` to SW |
+| `ui/options.html` | 2 / 7 | Contest URL + monitoring interval (1–60 min) |
+| `ui/options.js` | 2 / 7 | Persists URL + `monitoringIntervalMinutes`; `CONTEST_URL_SAVED` / `MONITORING_INTERVAL_SAVED` |
 | `tests/httpBoundaryProof.md` | 2 | Manual test guide for the extension↔backend HTTP boundary |
 
 ### Backend (`backend/`)
@@ -72,8 +73,9 @@
 | `model/RankingChange.java` | 3b | Overtake event record |
 | `parser/AcceptanceStatsParser.java` | 5 | Parses `"28,903 / 31.1K"` → `BigDecimal` — K/M/B suffix support, zero `double` math |
 | `parser/ParsedAcceptance.java` | 5 | Record: `BigDecimal acceptedUsers`, `BigDecimal totalUsers` |
-| `parser/ParseException.java` | 5 | Checked exception for malformed input |
-| `service/ContestStateService.java` | 3b / 4 | `AtomicReference<ContestStats>` + `synchronized` critical section for `initializeContest` and `applyIngest` |
+| `parser/ParseException.java` | 5 | Unchecked (`IllegalArgumentException`) for malformed input |
+| `service/AcceptanceCalculationService.java` | 6 | `acceptedUsers × 100 / totalUsers`, scale 10 HALF_UP; zero total throws |
+| `service/ContestStateService.java` | 3b / 4 / 6 | `synchronized applyIngest`: deep-copy, parse, calculate, ranking/overtake stubs, publish |
 
 ### Test Suite (`backend/src/test/`)
 
@@ -81,35 +83,32 @@
 |---|:---:|:---:|---|
 | `ContestHealthControllerTest` | 1 | 1 | `GET /api/contest/health` response shape |
 | `ContestConfigControllerTest` | 7 | 3b | Valid config, 4-question constraint, duplicate slots, blank fields |
-| `ContestIngestControllerTest` | 8 | 4 | Valid ingest, `LOGIN_WALL`, `SELECTOR_NOT_FOUND`, invalid Q slot, blank `rawUsersAccepted` |
+| `ContestIngestControllerTest` | 9 | 4 / 6 | Valid ingest + numeric fields, zero-total `PARSE_ERROR`, `LOGIN_WALL`, `SELECTOR_NOT_FOUND` |
 | `AcceptanceStatsParserTest` | 40 | 5 | Plain integers, commas, K/M/B suffixes, float-drift regression, null/malformed error handling |
-| **Total** | **56** | — | **100% passing** |
+| `AcceptanceCalculationServiceTest` | 3 | 6 | 28903/31100 → 92.9356913183; zero total; null args |
+| `ContestStateServiceConcurrencyTest` | 4 | 6 | 4 simultaneous ingests, last-write-wins, isolated parse failure, concurrent readers |
+| **Total** | **64** | — | **100% passing** |
 
 ### Knowledge Artifacts (repo root)
 
 | File | Status |
 |---|---|
-| `CHANGELOG.md` | ✅ Current through Phase 5 |
-| `DECISIONS.md` | ✅ 13+ ADRs documented |
-| `FLOW.md` | ✅ Cross-process sequence diagram |
-| `DOCUMENTATION.md` | ✅ Setup, REST API contract, security notes |
+| `CHANGELOG.md` | ✅ Current through Phase 7 |
+| `DECISIONS.md` | ✅ ADR-001–021 (interval clamp, ENDED hook) |
+| `FLOW.md` | ✅ Cross-process sequence + interval / ENDED / SW-restart |
+| `DOCUMENTATION.md` | ✅ Setup, REST API contract, interval options |
 | `LEARN.md` | ✅ End-to-end trace + debugging index |
+| `models.md` | ✅ Agent Council role → plan model vs actual (Cursor Grok 4.6) |
 
 ---
 
-## What's Next (Phases 6–11)
+## What's Next (Phases 8–11)
 
-### Phase 6 — Four Questions + Concurrency
-**Lead:** Extension/Background Agent + Backend/Core Agent | **Reviewer:** Edge-Case Red Team
-- Wire `alarmScheduler.js` to run scrape cycle across all 4 background tabs sequentially
-- Wire `background.js` `SCRAPE_RESULT` handler to call `backendClient.postIngest` per question
-- Complete `ContestStateService.applyIngest` to call `AcceptanceStatsParser` + `AcceptanceCalculationService`
-- Add `AcceptanceCalculationService.java` (`percentage = acceptedUsers / totalUsers × 100`, `BigDecimal`)
-- Concurrency test: 4 simultaneous ingest calls → assert consistent `ContestStats` snapshot
+### Phase 6 — Four Questions + Concurrency ✅
+Done. Immediate first cycle + 5-min alarm after discovery. `applyIngest` parses/calculates inside the synchronized critical section with deep-copied `QuestionStats`.
 
-### Phase 7 — Alarm Scheduler
-**Lead:** Extension/Background Agent | **Reviewer:** Architect
-- `extension/background/alarmScheduler.js` — `chrome.alarms` 5-min cycle, `cycleInProgress` guard
+### Phase 7 — Alarm Scheduler ✅
+Done on `feat/phase7-alarm-polish`. Configurable interval (default 5, clamp 1–60). `stopMonitoringAlarm()` / `handleContestEnded()` / `CONTEST_ENDED` message ready for Phase 11. No fake ENDED detection (ADR-021). SW restart restores a missing alarm if still monitoring.
 
 ### Phase 8 — State + Ranking
 **Lead:** Backend/Core Agent | **Reviewer:** Edge-Case Red Team
@@ -131,6 +130,7 @@
 ### Phase 11 — Robustness + Lifecycle
 **Lead:** Backend/Core + Extension/Background + Edge-Case Red Team | **Reviewer:** Architect
 - `ContestLifecycleService.java` — signal-based ENDED detection (3 unchanged cycles)
+- Call existing Phase 7 hook: `handleContestEnded()` or `{ type: "CONTEST_ENDED" }` when health/status reports ENDED
 - `TAB_MISSING` recovery in `tabLifecycleManager.js`
 - `extension/tests/tabLifecycle.test.js` + `backendClient.test.js` (Jest)
 - Final Edge-Case Red Team review
@@ -150,7 +150,7 @@ mvn spring-boot:run
 ```bash
 cd backend
 mvn test
-# Expected: 56 tests, 0 failures
+# Expected: 64 tests, 0 failures
 ```
 
 ### Load the Extension

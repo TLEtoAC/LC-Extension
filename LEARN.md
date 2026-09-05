@@ -8,61 +8,68 @@ The Chrome extension scrapes raw "Users Accepted" strings from LeetCode and POST
 ### Extension Side
 - **`background.js`**: The service worker. Wires together alarm events, message events, and the tab lifecycle. Think of it as the extension's main loop — but event-driven, not a literal loop.
 - **`tabLifecycleManager.js`**: Keeps 4 background tabs alive for Q1–Q4. Persists tab IDs to `chrome.storage.local` because the service worker can be killed and restarted at any time.
-- **`alarmScheduler.js`**: Uses `chrome.alarms` to fire every 5 minutes. On each tick, checks `cycleInProgress` (also persisted to storage) to prevent overlapping cycles.
+- **`alarmScheduler.js`**: Registers `scrapeCycle` at `monitoringIntervalMinutes` (default 5, clamp 1–60). `runScrapeCycle()` walks Q1→Q4 sequentially: register pending scrape → reload → wait 20s. Timeout POSTs `NAVIGATION_TIMEOUT`. `stopMonitoringAlarm()` / `handleContestEnded()` is the Phase 11 ENDED hook — no ENDED detection in this module. Pending map lives here; `background.js` calls `resolvePendingScrape`.
 - **`backendClient.js`**: Thin HTTP client. All calls to the backend go through here. If the backend is unreachable, sets `backendUnreachable: true` in storage and drops the request — no queuing, no aggressive retry.
 - **`contestPageScript.js`**: Runs on the contest homepage. Finds the 4 problem links (href-first, click-and-capture fallback). Never hardcodes URLs.
 - **`problemPageScript.js`**: Runs on each problem page. Uses `MutationObserver` to wait for "Users Accepted", does a double-read stability check, detects login walls, and sends the raw string to the background.
 
 ### Backend Side
 - **`AcceptanceStatsParser.java`**: Converts `"28,903 / 31.1K"` to two `BigDecimal` values. Uses `BigDecimal` multiplication for K/M/B — never `double`.
-- **`AcceptanceCalculationService.java`**: Divides acceptedUsers by totalUsers, multiplies by 100. All `BigDecimal`.
-- **`ContestStateService.java`**: The heart of the backend. A `synchronized` method wraps parse → calculate → rank → compare → `AtomicReference.set()`. This is the only place a new `ContestStats` snapshot is published.
+- **`AcceptanceCalculationService.java`**: `acceptedUsers × 100 / totalUsers`, scale 10, HALF_UP. Zero `totalUsers` throws — never store 0%.
+- **`ContestStateService.java`**: The heart of the backend. A `synchronized` method wraps deep-copy → parse → calculate → ranking stub (Phase 8) → overtake stub (Phase 9) → `AtomicReference.set()`. This is the only place a new `ContestStats` snapshot is published.
 - **`ComparisonService.java`**: Compares all pairs (Qi, Qj). Only emits a `RankingChange` when a relationship flips (e.g., Q3 was below Q1, now above). Handles ties.
-- **`ContestLifecycleService.java`**: Watches for 3 consecutive unchanged cycles across all 4 questions → marks contest ENDED.
+- **`ContestLifecycleService.java`**: Phase 11 — watches for 3 consecutive unchanged cycles across all 4 questions → marks contest ENDED. The extension already has `handleContestEnded()` (Phase 7) waiting for that signal.
 
 ## Full-Cycle Trace: One Scraped Value, Both Processes
 
-Follow a single value from DOM to dashboard:
+Follow a single value from cycle start to snapshot:
 
-1. **`problemPageScript.js`** (Q1 problem page, content script context)
+1. **`alarmScheduler.runScrapeCycle()`** (service worker)
+   - Guard: `cycleInProgress` already true → return
+   - `setCycleInProgress(true)`
+   - For Q1: `registerPendingScrape(tabId, "Q1")` then `reloadTab(tabId)` then `waitForScrapeResult(tabId, 20000)`
+
+2. **`problemPageScript.js`** (Q1 problem page, content script context)
    - `MutationObserver` fires: "Users Accepted" element appears
    - Two reads 300ms apart: both say `"28,903 / 31.1K"` — stable
-   - Sends: `{ rawUsersAccepted: "28,903 / 31.1K", scrapingStatus: "SUCCESS", selectorStrategyUsed: "text-anchored" }`
+   - Sends: `{ type: "SCRAPE_RESULT", rawUsersAccepted: "28,903 / 31.1K", scrapingStatus: "SUCCESS", selectorStrategyUsed: "text-anchored", url }`
+   - No `questionNumber` in the payload — background maps tab id / URL → Qn
 
-2. **`background.js`** (service worker context)
-   - Receives message via `chrome.runtime.onMessage`
-   - Calls `backendClient.postIngest("Q1", payload)`
+3. **`background.js` `handleScrapeResult`**
+   - Invert persisted `tabIds` (`tabId → Q1`); fallback: match `message.url` to `discoveredQuestions[].problemUrl`
+   - Unmapped → `{ ok: false, error: "UNKNOWN_TAB" }`
+   - `backendClient.postIngest("Q1", payload)` — slot normalized to `Qn`
+   - `resolvePendingScrape(tabId)` so the cycle waiter advances
+   - Single-question failure is logged, not thrown
 
-3. **`backendClient.js`**
+4. **`backendClient.js`**
    - `fetch("http://localhost:8080/api/contest/ingest/Q1", { method: "POST", body: JSON.stringify(payload) })`
-   - Awaits response
+   - Unreachable → `null` (ADR-009). Handler still resolves the pending scrape.
 
-4. **`ContestIngestController.java`** (Spring HTTP thread)
-   - Receives POST, validates payload
-   - Calls `contestStateService.applyIngest("Q1", ingestRequest)`
+5. **`ContestIngestController.java`** (Spring HTTP thread)
+   - Validates slot Q1–Q4 and payload
+   - `contestStateService.applyIngest("Q1", ingestRequest)`
 
-5. **`ContestStateService.java`** (same Spring thread, enters synchronized block)
-   - **Critical section begins**
-   - Calls `AcceptanceStatsParser.parse("28,903 / 31.1K")`
-     - `"28,903"` → strip comma → `new BigDecimal("28903")`
-     - `"31.1K"` → strip K → `new BigDecimal("31.1").multiply(new BigDecimal("1000"))` = `31100`
-   - Calls `AcceptanceCalculationService.calculate(28903, 31100)`
-     - `28903 / 31100 * 100` = `92.94...%` (BigDecimal)
-   - Updates Q1 in the working copy of `ContestStats`
-   - Recomputes ranking across all 4 questions (sort by percentage descending)
-   - Calls `ComparisonService.detectChanges(previousSnapshot, newSnapshot)`
-     - If Q1's percentage just crossed Q2's → emits `RankingChange("Q1 overtook Q2")`
-   - `atomicReference.set(newContestStats)` — new snapshot published atomically
+6. **`ContestStateService.java`** (same thread, `synchronized applyIngest`)
+   - **Critical section begins** — no I/O
+   - `ContestStats previous = currentStats.get()`; throw if uninitialized
+   - Deep-copy **all four** `QuestionStats` (new objects — ADR-014)
+   - Target copy: timestamp, status, selector, errorMessage
+   - SUCCESS: `AcceptanceStatsParser.parse("28,903 / 31.1K")`
+     - `"28,903"` → `28903`; `"31.1K"` → `31100`
+     - `AcceptanceCalculationService.calculatePercentage(28903, 31100)` → `92.9356913183`
+     - `ParseException` or zero-total `IllegalArgumentException` → `PARSE_ERROR`, metrics nulled
+   - Non-SUCCESS (incl. `NAVIGATION_TIMEOUT`): clear metric fields, keep extension status
+   - TODO(Phase 8): `ranking = previous.getRanking()`
+   - TODO(Phase 9): `recentChanges` / `pairwiseRelationships` copied
+   - `currentStats.set(newSnapshot)`
    - **Critical section ends**
-   - Returns updated `QuestionStats` for Q1
 
-6. **`ContestIngestController`** returns 200 + `QuestionStats` JSON to the extension
+7. **`ContestIngestController`** returns 200 + `QuestionStats` (`acceptedUsers`, `totalUsers`, `usersAcceptedPercentage`)
 
-7. **`sidepanel.js`** (5 seconds later)
-   - `fetch("http://localhost:8080/api/contest/status")`
-   - `ContestStatusController` calls `atomicReference.get()` (lock-free)
-   - Returns full `ContestStats` JSON
-   - Side panel renders: ranking, Q1–Q4 percentages, overtake banner
+8. Cycle continues Q2→Q4. `finally`: `setCycleInProgress(false)` always.
+
+9. **`sidepanel.js`** (Phase 10) will `GET /api/contest/status` and read the snapshot lock-free.
 
 ## Debugging Index
 
@@ -72,7 +79,14 @@ Follow a single value from DOM to dashboard:
 | Requests reach the backend but are rejected | CORS: is the extension ID in `CorsConfig.java` `EXTENSION_ORIGIN` correct? | Is the `"key"` field in `manifest.json` set? | Did you reload the extension after changing the key? |
 | Scraping returns `SELECTOR_NOT_FOUND` | Has LeetCode changed their DOM? | Check `problemPageScript.js` selector fallback chain | Try the aria-label fallback manually in DevTools |
 | `LOGIN_WALL` status | User is not logged into LeetCode in Chrome | Check if LeetCode session cookie is present | Log in to LeetCode and reload the problem tab |
-| Cycling never starts | Is `cycleInProgress` stuck at `true` in storage? | Service worker restarted mid-cycle — clear storage and reload | Check `alarmScheduler.js` alarm registration |
+| Cycling never starts | Is `cycleInProgress` stuck at `true` in storage? | SW start should `recoverOrphanedCycleGuard()` — check that ran | Check `alarmScheduler.js` / `ensureMonitoringAlarm` |
+| Interval change does nothing | Did Save persist `monitoringIntervalMinutes`? | SW log for `MONITORING_INTERVAL_SAVED` | Alarm only re-registers after Q1–Q4 tabs exist |
+| Alarm keeps firing after contest ends | Phase 11 has not called `handleContestEnded` yet | ENDED is not computed until `ContestLifecycleService` | Do not invent detection in the extension |
+| Alarm returns after ENDED + reload | Is `monitoringStopped` still true? | `ensureMonitoringAlarm` must no-op when stopped | Check `stopMonitoringAlarm` wrote storage |
+| Only one question updates under load | Four POSTs must all finish — check `ContestStateServiceConcurrencyTest` | Was `applyIngest` mutating snapshot objects in place? (torn read) | Confirm method is `synchronized` and copies `QuestionStats` |
+| Percentage set but counts null | Deep-copy missing — reader held a mutating object | Check `copyQuestionStats` is used for all four slots | Run `concurrentIngest_withConcurrentReads_snapshotAlwaysConsistent` |
+| Slot stays empty after a hung tab | Timeout must POST `NAVIGATION_TIMEOUT`, not skip | Check `waitForScrapeResult` 20s path | Backend `scrapingStatus` should be `NAVIGATION_TIMEOUT` |
+| `0%` stored for a question | Zero `totalUsers` must be `PARSE_ERROR` | `AcceptanceCalculationService` should have thrown | `applyIngest` catch must null metrics |
 | Duplicate overtake events | `ComparisonService` bug — check pairwise relationship storage in `ContestStats` | Run `ComparisonServiceTest` | Check that previous snapshot is from `AtomicReference.get()` inside the critical section |
 | Backend `500` on ingest | Ingest called before `POST /api/contest/config`? | Check backend logs for `NullPointerException` in `ContestStateService` | Ensure discovery phase completed before monitoring phase |
 

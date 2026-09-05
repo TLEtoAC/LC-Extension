@@ -18,14 +18,37 @@ Two processes communicate over HTTP on localhost:8080.
 5. `background.js` calls `backendClient.postConfig({ contestUrl, questions: [...] })`
 6. Backend: `ContestConfigController` receives POST, calls `ContestStateService.initializeContest()`
 7. Backend: initializes empty `ContestStats` for Q1–Q4
-8. `tabLifecycleManager` opens 4 background tabs (Q1–Q4)
-9. `alarmScheduler` registers `chrome.alarms` with 5-minute period
+8. `tabLifecycleManager` opens 4 background tabs (Q1–Q4); IDs persisted
+9. `background.js` `sendResponse`s discovery success, then:
+   - `registerMonitoringAlarm()` — `chrome.alarms` `scrapeCycle`, period from `monitoringIntervalMinutes` (default 5, clamp 1–60), delay 0
+   - `runScrapeCycle()` immediately (does not wait for the first alarm tick)
+
+## Interval Change (Phase 7)
+
+1. User sets minutes on `options.html` and clicks Save
+2. `options.js` persists `monitoringIntervalMinutes`; sends `MONITORING_INTERVAL_SAVED` (URL-only change still uses `CONTEST_URL_SAVED`)
+3. `updateMonitoringInterval()` clears `scrapeCycle` and creates it with `delayInMinutes = period` — no bonus cycle
+4. If monitoring has not started yet, only storage is updated; discovery will read it later
+
+## Service Worker Restart (Phase 7)
+
+1. Module load runs `recoverOrphanedCycleGuard()` — a dead mid-cycle SW left `cycleInProgress=true` with an empty pending map; clear it so the next alarm can run
+2. `ensureMonitoringAlarm()` — if problem tabs are persisted, `monitoringStopped` is false, and `scrapeCycle` is missing (unpacked reload), re-register with the stored period. Do not call `runScrapeCycle()` on restart
+3. `cycleInProgress` still skips a live overlapping tick
+
+## Contest ENDED (Phase 7 hook; detection is Phase 11)
+
+1. Phase 11 `ContestLifecycleService` marks `lifecycleState=ENDED` (ADR-006: 3 unchanged cycles) and the extension observes it via health/status (Phase 10)
+2. Phase 11 sends `{ type: "CONTEST_ENDED" }` or calls `handleContestEnded()`
+3. `stopMonitoringAlarm()` → `chrome.alarms.clear('scrapeCycle')` + `monitoringStopped=true`
+4. `runScrapeCycle` / `onAlarm` refuse new cycles; SW restart will not recreate the alarm
 
 ## One Full Monitoring Cycle (Both Processes)
 
 ```mermaid
 sequenceDiagram
     participant Alarm as chrome.alarms
+    participant AS as alarmScheduler.js
     participant BG as background.js
     participant TLM as tabLifecycleManager.js
     participant CS as problemPageScript.js
@@ -35,25 +58,34 @@ sequenceDiagram
     participant REF as AtomicReference<ContestStats>
     participant SP as sidepanel.js
 
-    Alarm->>BG: onAlarm fires
-    BG->>TLM: getCycleInProgress()
-    TLM-->>BG: false
-    BG->>TLM: setCycleInProgress(true)
-    loop Q1 to Q4
-        BG->>TLM: reloadTab(tabId)
+    Alarm->>BG: onAlarm scrapeCycle (or discovery calls runScrapeCycle)
+    BG->>AS: runScrapeCycle()
+    AS->>TLM: getCycleInProgress()
+    TLM-->>AS: false
+    AS->>TLM: setCycleInProgress(true)
+    loop Q1 to Q4 sequential
+        AS->>AS: registerPendingScrape(tabId, Qn)
+        AS->>TLM: reloadTab(tabId)
         TLM->>CS: chrome.tabs.reload() -> onUpdated 'complete'
-        CS->>CS: MutationObserver waits for "Users Accepted"
-        CS->>CS: double-read stability check
-        CS-->>BG: { rawUsersAccepted, scrapingStatus, selectorStrategyUsed }
-        BG->>BC: postIngest(questionNumber, payload)
-        BC->>API: POST /api/contest/ingest/Q1
-        API->>SVC: applyIngest(Q1, payload) [enters critical section]
-        SVC->>SVC: parse -> calculate -> rank -> compare
-        SVC->>REF: AtomicReference.set(newSnapshot)
-        SVC-->>API: QuestionStats for Q1
-        API-->>BC: 200 OK + QuestionStats JSON
+        CS->>CS: MutationObserver + double-read
+        alt SCRAPE_RESULT within 20s
+            CS-->>BG: { rawUsersAccepted, scrapingStatus, ... }
+            BG->>BC: postIngest(Qn, payload)
+            BC->>API: POST /api/contest/ingest/Qn
+            API->>SVC: applyIngest (synchronized)
+            SVC->>SVC: deep-copy QuestionStats
+            SVC->>SVC: parse + calculatePercentage
+            SVC->>SVC: ranking = previous (TODO Phase 8)
+            SVC->>SVC: overtakes = previous (TODO Phase 9)
+            SVC->>REF: AtomicReference.set(newSnapshot)
+            SVC-->>API: QuestionStats
+            API-->>BC: 200 + acceptedUsers, totalUsers, usersAcceptedPercentage
+            BG->>AS: resolvePendingScrape(tabId)
+        else 20s timeout
+            AS->>BC: postIngest(Qn, NAVIGATION_TIMEOUT)
+        end
     end
-    BG->>TLM: setCycleInProgress(false)
+    AS->>TLM: setCycleInProgress(false)
     SP->>API: GET /api/contest/status (every 5s)
     API->>REF: AtomicReference.get()
     REF-->>API: ContestStats snapshot
