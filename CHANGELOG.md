@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+## Phase 10 — Status/Health API + Side Panel UI (2026-09-05)
+**Lead:** REST API + UI Agents | **Reviewer:** Architect
+**Side:** backend/ + extension/
+- [x] ContestStatusController — GET /api/contest/status (lock-free); uninitialized empty envelope
+- [x] ContestHealthController — lifecycleState, discoveryStatus, lastIngestReceivedAt, questionStatuses
+- [x] sidepanel.html/js/css — 5s poll, ranking, overtakes, backend-unreachable + empty + ENDED banners
+- [x] popup.html/js — lightweight ranking + OPEN_SIDE_PANEL
+- [x] background OPEN_SIDE_PANEL; manifest host_permissions for localhost:8080
+- [x] Status/health JUnit; `node --check` on all extension JS
+
 ## Phase 9 — Overtaking Detection (2026-09-05)
 **Lead:** Backend/Core Agent | **Reviewer:** Testing/QA
 **Side:** backend/

@@ -25,7 +25,11 @@
   "description": "Monitors Users Accepted percentages for all 4 problems in a LeetCode contest.",
   "key": "PLACEHOLDER_KEY_SEE_DOCUMENTATION",
   "permissions": ["tabs", "storage", "alarms", "sidePanel", "scripting"],
-  "host_permissions": ["https://leetcode.com/*"],
+  "host_permissions": [
+    "https://leetcode.com/*",
+    "http://127.0.0.1:8080/*",
+    "http://localhost:8080/*"
+  ],
   "background": {
     "service_worker": "background/background.js",
     "type": "module"

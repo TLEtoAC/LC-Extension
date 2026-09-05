@@ -334,6 +334,33 @@ async function handleContestEndedMessage(message, sender, sendResponse) {
   sendResponse({ ok: true });
 }
 
+/**
+ * Opens the dashboard side panel for the sender's window (Phase 10).
+ *
+ * @param {object} message
+ * @param {chrome.runtime.MessageSender} sender
+ * @param {function} sendResponse
+ * @returns {Promise<void>}
+ */
+async function handleOpenSidePanel(message, sender, sendResponse) {
+  try {
+    let windowId = sender?.tab?.windowId;
+    if (windowId == null) {
+      const focused = await chrome.windows.getLastFocused();
+      windowId = focused?.id;
+    }
+    if (windowId == null) {
+      sendResponse({ ok: false, error: 'NO_WINDOW' });
+      return;
+    }
+    await chrome.sidePanel.open({ windowId });
+    sendResponse({ ok: true, windowId });
+  } catch (err) {
+    console.error('[background] OPEN_SIDE_PANEL failed:', err);
+    sendResponse({ ok: false, error: err?.message ?? 'OPEN_FAILED' });
+  }
+}
+
 // ─── onMessage ───────────────────────────────────────────────────────────────
 
 /**
@@ -393,9 +420,7 @@ function onMessage(message, sender, sendResponse) {
       break;
 
     case 'OPEN_SIDE_PANEL':
-      // Phase 6: open the side panel for the sender tab.
-      console.log('[background] OPEN_SIDE_PANEL received — handler wired in Phase 6.');
-      sendResponse({ ok: true });
+      handleOpenSidePanel(message, sender, sendResponse);
       break;
 
     default:

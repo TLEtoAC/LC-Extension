@@ -87,10 +87,10 @@ sequenceDiagram
     end
     AS->>TLM: setCycleInProgress(false)
     SP->>API: GET /api/contest/status (every 5s)
-    API->>REF: AtomicReference.get()
-    REF-->>API: ContestStats snapshot
-    API-->>SP: 200 OK + ContestStats JSON
-    SP->>SP: render dashboard
+    API->>REF: AtomicReference.get() (lock-free)
+    REF-->>API: ContestStats snapshot or null
+    API-->>SP: 200 + initialized/questions/ranking/recentChanges
+    SP->>SP: render dashboard or empty / backend-unreachable banner
 ```
 
 ## Backend-Unreachable Path

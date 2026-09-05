@@ -81,10 +81,29 @@ Response `200` — updated `QuestionStats`:
 SUCCESS with unparseable text or `totalUsers == 0` still returns 200; `scrapingStatus` is `PARSE_ERROR` and the three metric fields are `null`.
 
 ### GET /api/contest/status
-Returns the latest ContestStats snapshot.
+Lock-free read of the published snapshot (`AtomicReference.get()`). Always 200.
+
+Uninitialized (`initialized: false`):
 ```json
 {
+  "initialized": false,
+  "contestUrl": null,
+  "questions": [],
+  "ranking": [],
+  "recentChanges": [],
+  "lastUpdated": null,
+  "lifecycleState": null,
+  "pairwiseRelationships": {}
+}
+```
+
+Configured:
+```json
+{
+  "initialized": true,
+  "contestUrl": "https://leetcode.com/contest/weekly-400",
   "lastUpdated": "2024-01-01T12:00:00Z",
+  "lifecycleState": "MONITORING",
   "questions": [ ... ],
   "ranking": ["Q4", "Q2", "Q1", "Q3"],
   "recentChanges": [ { "description": "Q4 overtook Q3", "questionNumberOvertaker": "Q4", "questionNumberOvertaken": "Q3", "timestamp": "..." } ],
@@ -93,15 +112,21 @@ Returns the latest ContestStats snapshot.
 ```
 `ranking` is question numbers by `usersAcceptedPercentage` **descending** (highest first). Equal percentages break by question number (`Q1` before `Q2`). Slots with a null percentage (PARSE_ERROR, timeout, not yet scraped) are listed last. Empty until the first ingest.
 
+Side panel polls this every 5 seconds. `fetch` failure → "Backend not running" banner (ADR-009). Do not treat `initialized: false` as an error.
+
 ### GET /api/contest/health
 ```json
 {
   "status": "OK",
-  "lifecycleState": "MONITORING",
   "backendVersion": "1.0.0",
-  "lastIngestReceivedAt": { "Q1": "...", "Q2": "...", "Q3": "...", "Q4": "..." }
+  "timestamp": "2026-09-05T07:40:00Z",
+  "lifecycleState": "MONITORING",
+  "discoveryStatus": "CONFIGURED",
+  "lastIngestReceivedAt": { "Q1": "...", "Q2": null, "Q3": null, "Q4": null },
+  "questionStatuses": { "Q1": "SUCCESS", "Q2": null, "Q3": null, "Q4": null }
 }
 ```
+`lifecycleState` is `UNINITIALISED` until `POST /config`. `lastIngestReceivedAt` is each slot's last scrape timestamp — a stalled extension vs a stalled backend is distinguishable from this payload alone.
 
 ## Scraping Status Values
 | Status | Meaning |
@@ -133,8 +158,8 @@ Returns the latest ContestStats snapshot.
 | `background/backendClient.js` | HTTP client; `postIngest` normalizes slot to `Qn` |
 | `content-scripts/contestPageScript.js` | Contest homepage discovery |
 | `content-scripts/problemPageScript.js` | Problem page scraping |
-| `ui/sidepanel.html/js/css` | Dashboard, polls backend every 5s |
-| `ui/popup.html/js` | Lightweight fallback |
+| `ui/sidepanel.html/js/css` | Dashboard — 5s status poll, ranking, overtakes, unreachable/empty/ENDED |
+| `ui/popup.html/js` | Lightweight ranking fallback + open side panel |
 | `ui/options.html/js` | Contest URL + scrape interval (1–60 min) |
 
 ### Backend

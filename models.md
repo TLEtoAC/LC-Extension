@@ -49,7 +49,8 @@ Factual record of which LLM ran which council role in this repo, versus the pair
 | 7. Alarm Scheduler | Extension/Background | Architect | **Cursor Grok 4.6** parent Architect + inherit Phase 7 implementer (Extension/Background lead; Architect review) |
 | 8. State + Ranking | Backend/Core | Edge-Case Red Team | **Cursor Grok 4.6** parent Architect + inherit implementer (Backend/Core + Testing/QA + Docs + Red Team) |
 | 9. Overtaking Detection | Backend/Core | Testing/QA | **Cursor Grok 4.6** inherit (Backend/Core + Testing/QA + Docs) |
-| 10–11 | See §31.2 | See §31.2 | In progress this session. Default remains Cursor Grok 4.6. |
+| 10. Status/Health + UI | REST API + UI | Architect | **Cursor Grok 4.6** inherit (REST/UI + Docs) |
+| 11. Robustness + Lifecycle | Backend/Core + Ext/Background + Red Team | Architect | In progress this session. Cursor Grok 4.6 inherit. |
 
 ---
 

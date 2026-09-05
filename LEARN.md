@@ -20,6 +20,8 @@ The Chrome extension scrapes raw "Users Accepted" strings from LeetCode and POST
 - **`RankingService.java`**: Ranks Q1–Q4 by `usersAcceptedPercentage` descending (ADR-022). Ties by question number. Null percentages last. No I/O; called only from the critical section.
 - **`ComparisonService.java`**: Pairwise percentages (ADR-023). Emits `RankingChange` only on Qx <= Qy → Qx > Qy (EQ counts as <=). Dedup via `pairwiseRelationships` on the snapshot. Null % keeps the prior relation so one PARSE_ERROR cannot wipe others.
 - **`ContestLifecycleService.java`**: Phase 11 — watches for 3 consecutive unchanged cycles across all 4 questions → marks contest ENDED. The extension already has `handleContestEnded()` (Phase 7) waiting for that signal.
+- **`ContestStatusController.java`**: Lock-free `GET /api/contest/status`. Empty envelope when uninitialized (ADR-025).
+- **`sidepanel.js` / `popup.js`**: Poll/render ranking, percentages, overtakes. Backend-unreachable is a banner, not a crash.
 
 ## Full-Cycle Trace: One Scraped Value, Both Processes
 
@@ -70,7 +72,7 @@ Follow a single value from cycle start to snapshot:
 
 8. Cycle continues Q2→Q4. `finally`: `setCycleInProgress(false)` always.
 
-9. **`sidepanel.js`** (Phase 10) will `GET /api/contest/status` and read the snapshot lock-free.
+9. **`sidepanel.js`** polls `GET /api/contest/status` every 5s (lock-free `AtomicReference.get()`). Null/`TypeError` → backend-unreachable banner (ADR-009). `initialized: false` → empty state. `lifecycleState: ENDED` → send `CONTEST_ENDED` (Phase 7 hook).
 
 ## Debugging Index
 

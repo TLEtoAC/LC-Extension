@@ -9,7 +9,7 @@
 
 | Component | Status |
 |---|---|
-| Backend (`mvn test`) | ✅ **79 / 79 tests passing** |
+| Backend (`mvn test`) | ✅ **82 / 82 tests passing** |
 | Extension (syntax check) | ✅ All JS files pass `node --check` |
 | GitHub (`origin/phase1`) | ✅ Latest commit: `5c0ea2e` |
 
@@ -30,7 +30,7 @@
 | 7 | Alarm Scheduler | Extension/Background Agent | ✅ Done | Interval 1–60 + ENDED hook (`feat/phase7-alarm-polish`); core loop was Phase 6 (ADR-015) |
 | 8 | State + Ranking | Backend/Core Agent | ✅ Done | `RankingService` descending %; 72 tests |
 | 9 | Overtaking Detection | Backend/Core Agent | ✅ Done | `ComparisonService` pairwise; 79 tests |
-| 10 | Status/Health API + Side Panel UI | REST API + UI Agents | 🔲 Pending | — |
+| 10 | Status/Health API + Side Panel UI | REST API + UI Agents | ✅ Done | status + health + side panel/popup |
 | 11 | Robustness + Lifecycle | Backend/Core + Ext/Background + Edge-Case Red Team | 🔲 Pending | — |
 | — | Continuous Docs | Logging/Docs Agent | 🔄 Active | All 5 artifacts maintained |
 
@@ -44,14 +44,16 @@
 |---|:---:|---|
 | `manifest.json` | 2 | MV3 manifest — permissions, side panel, content script patterns, key placeholder |
 | `package.json` | 2 | Jest ^29 test config |
-| `background/background.js` | 2 / 3c / 6 / 7 | Service worker — discovery, `handleScrapeResult` → `postIngest`, interval re-register, `CONTEST_ENDED` hook, SW alarm restore |
+| `background/background.js` | 2 / 3c / 6 / 7 / 10 | Service worker — discovery, ingest, interval, `CONTEST_ENDED`, `OPEN_SIDE_PANEL` |
 | `background/tabLifecycleManager.js` | 2 | Tab persistence (storage-backed), event-driven reload (`chrome.tabs.onUpdated`), `cycleInProgress` guard |
 | `background/alarmScheduler.js` | 6 / 7 | Configurable `scrapeCycle`; sequential `runScrapeCycle`; pending-scrape map; `stopMonitoringAlarm` / `handleContestEnded`; 20s `NAVIGATION_TIMEOUT` |
-| `background/backendClient.js` | 2 / 6 | `fetch()` wrapper — `postIngest` normalizes `1`/`Q1` → `/ingest/Qn` |
+| `background/backendClient.js` | 2 / 6 / 10 | `fetch()` wrapper — ingest + `getStatus` / `checkHealth` |
 | `content-scripts/contestPageScript.js` | 3a | Contest homepage discovery — `MutationObserver`, href-first + click-and-capture fallback, 5 selector strategies |
 | `content-scripts/problemPageScript.js` | 4 | Problem page scraper — `MutationObserver`, 3-tier selector chain, double-read stability, login-wall & 404 detection |
 | `ui/options.html` | 2 / 7 | Contest URL + monitoring interval (1–60 min) |
 | `ui/options.js` | 2 / 7 | Persists URL + `monitoringIntervalMinutes`; `CONTEST_URL_SAVED` / `MONITORING_INTERVAL_SAVED` |
+| `ui/sidepanel.html/js/css` | 10 | Dashboard — 5s status poll, ranking, overtakes, unreachable/empty/ENDED |
+| `ui/popup.html/js` | 10 | Lightweight ranking + open side panel |
 | `tests/httpBoundaryProof.md` | 2 | Manual test guide for the extension↔backend HTTP boundary |
 
 ### Backend (`backend/`)
@@ -61,7 +63,8 @@
 | `pom.xml` | 1 | Spring Boot 3.2.5, Java 17, Web + Test — no Playwright |
 | `src/main/resources/application.properties` | 1 | Binds to `127.0.0.1:8080` (loopback only) |
 | `config/CorsConfig.java` | 1 | CORS restricted to `chrome-extension://PLACEHOLDER_EXTENSION_ID` |
-| `controller/ContestHealthController.java` | 1 | `GET /api/contest/health` — status, version, timestamp |
+| `controller/ContestHealthController.java` | 1 / 10 | `GET /api/contest/health` — lifecycle, lastIngestReceivedAt, questionStatuses |
+| `controller/ContestStatusController.java` | 10 | `GET /api/contest/status` — lock-free snapshot or empty envelope |
 | `controller/ContestConfigController.java` | 3b | `POST /api/contest/config` — validates 4 questions, initializes state |
 | `controller/ContestIngestController.java` | 4 | `POST /api/contest/ingest/{Q1-Q4}` — validates, delegates to `ContestStateService.applyIngest` |
 | `dto/ContestConfigRequest.java` | 3b | Inbound DTO for contest configuration |
@@ -83,7 +86,8 @@
 
 | Test Class | Tests | Phase | Coverage |
 |---|:---:|:---:|---|
-| `ContestHealthControllerTest` | 1 | 1 | `GET /api/contest/health` response shape |
+| `ContestHealthControllerTest` | 2 | 1 / 10 | Health shape + lastIngestReceivedAt after ingest |
+| `ContestStatusControllerTest` | 2 | 10 | Empty envelope + configured ranking snapshot |
 | `ContestConfigControllerTest` | 7 | 3b | Valid config, 4-question constraint, duplicate slots, blank fields |
 | `ContestIngestControllerTest` | 9 | 4 / 6 | Valid ingest + numeric fields, zero-total `PARSE_ERROR`, `LOGIN_WALL`, `SELECTOR_NOT_FOUND` |
 | `AcceptanceStatsParserTest` | 40 | 5 | Plain integers, commas, K/M/B suffixes, float-drift regression, null/malformed error handling |
@@ -93,14 +97,14 @@
 | `ContestStateServiceRankingTest` | 3 | 8 | Empty on init, snapshot publish, PARSE_ERROR last |
 | `ComparisonServiceTest` | 5 | 9 | Overtake, no-duplicate, tie, PARSE_ERROR isolation, lead→tie |
 | `ContestStateServiceOvertakeTest` | 2 | 9 | Snapshot publish + no duplicate after unchanged ingest |
-| **Total** | **79** | — | **100% passing** |
+| **Total** | **82** | — | **100% passing** |
 
 ### Knowledge Artifacts (repo root)
 
 | File | Status |
 |---|---|
 | `CHANGELOG.md` | ✅ Current through Phase 7 |
-| `DECISIONS.md` | ✅ ADR-001–023 (ranking + pairwise overtake) |
+| `DECISIONS.md` | ✅ ADR-001–025 (status envelope, localhost host_permissions) |
 | `FLOW.md` | ✅ Cross-process sequence + interval / ENDED / SW-restart |
 | `DOCUMENTATION.md` | ✅ Setup, REST API contract, interval options, security notes |
 | `LEARN.md` | ✅ End-to-end trace + debugging index |
@@ -122,12 +126,8 @@ Done. `RankingService` ranks by `usersAcceptedPercentage` descending (ADR-022). 
 ### Phase 9 — Overtaking Detection ✅
 Done. `ComparisonService` emits `RankingChange` only on Qx <= Qy → Qx > Qy (ties included, ADR-023). Dedup via snapshot `pairwiseRelationships`. One PARSE_ERROR does not wipe other pairs. Same synchronized publish as ranking.
 
-### Phase 10 — Status/Health API + Side Panel UI
-**Lead:** REST API Agent + UI Agent | **Reviewer:** Architect
-- `ContestStatusController.java` — `GET /api/contest/status`
-- Full health payload in `ContestHealthController` (incl. `lastIngestReceivedAt` per question)
-- `extension/ui/sidepanel.html` / `sidepanel.js` / `sidepanel.css` — polls every 5s, backend-unreachable banner
-- `extension/ui/popup.html` / `popup.js`
+### Phase 10 — Status/Health API + Side Panel UI ✅
+Done. Lock-free `GET /api/contest/status` (empty envelope if uninitialized). Health includes `lastIngestReceivedAt` and `lifecycleState`. Side panel polls every 5s; popup is a ranking fallback. Backend-unreachable is a banner (ADR-009). CORS still pinned — localhost added only to extension `host_permissions` (ADR-024).
 
 ### Phase 11 — Robustness + Lifecycle
 **Lead:** Backend/Core + Extension/Background + Edge-Case Red Team | **Reviewer:** Architect
@@ -152,7 +152,7 @@ mvn spring-boot:run
 ```bash
 cd backend
 mvn test
-# Expected: 79 tests, 0 failures
+# Expected: 82 tests, 0 failures
 ```
 
 ### Load the Extension

@@ -126,3 +126,15 @@
 - Decision: `ComparisonService` compares `usersAcceptedPercentage` pairwise. Canonical key `QavsQb` (a < b) stores how Qa compares to Qb (`GT`/`LT`/`EQ`). An event fires only when a stored relation flips across that inequality (EQ counts as <=). First observation stores the relation and emits nothing. Null percentage skips that pair and keeps the previous relation.
 - Rationale: Dedup lives on the snapshot's `pairwiseRelationships`. PARSE_ERROR on one slot must not wipe or re-emit other pairs.
 - Consequences: Becoming tied (GT/LT → EQ) is not an overtake. History is newest-first, capped at 20.
+
+## ADR-024: Extension host_permissions Include Local Backend
+- Context: Side panel and popup `fetch` localhost:8080. Manifest previously allowed only `https://leetcode.com/*`.
+- Decision: Add `http://127.0.0.1:8080/*` and `http://localhost:8080/*` only. Do not add `*` or LAN hosts.
+- Rationale: MV3 needs host permission for extension-page fetch. CORS stays pinned to the extension origin (ADR-005).
+- Consequences: User still must start the backend; unreachable remains a first-class UI state (ADR-009).
+
+## ADR-025: Uninitialized Status Is 200 Empty Envelope
+- Context: Side panel must not treat "no contest yet" as a backend error.
+- Decision: `GET /api/contest/status` returns 200 with `initialized: false` and empty collections when `getCurrentStats()` is null. Configured snapshots add `initialized: true` plus ContestStats fields.
+- Rationale: A 404/500 would look like backend-unreachable (ADR-009).
+- Consequences: UI keys off `initialized` and `backendUnreachable`, not HTTP status alone.
