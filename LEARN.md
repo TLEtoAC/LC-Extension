@@ -7,8 +7,8 @@ The Chrome extension scrapes raw "Users Accepted" strings from LeetCode and POST
 
 ### Extension Side
 - **`background.js`**: The service worker. Wires together alarm events, message events, and the tab lifecycle. Think of it as the extension's main loop — but event-driven, not a literal loop.
-- **`tabLifecycleManager.js`**: Keeps 4 background tabs alive for Q1–Q4. Persists tab IDs to `chrome.storage.local` because the service worker can be killed and restarted at any time.
-- **`alarmScheduler.js`**: Registers `scrapeCycle` at `monitoringIntervalMinutes` (default 5, clamp 1–60). `runScrapeCycle()` walks Q1→Q4 sequentially: register pending scrape → reload → wait 20s. Timeout POSTs `NAVIGATION_TIMEOUT`. `stopMonitoringAlarm()` / `handleContestEnded()` is the Phase 11 ENDED hook — no ENDED detection in this module. Pending map lives here; `background.js` calls `resolvePendingScrape`.
+- **`tabLifecycleManager.js`**: Keeps 4 background tabs alive for Q1–Q4. Persists tab IDs to `chrome.storage.local`. `recoverMissingTabs()` reopens closed/null slots from `discoveredQuestions`.
+- **`alarmScheduler.js`**: Registers `scrapeCycle` at `monitoringIntervalMinutes` (default 5, clamp 1–60). `runScrapeCycle()` recovers missing tabs, then walks Q1→Q4. After the cycle, `observeEndedAndStop()` reads status and calls `handleContestEnded()` if ENDED (ADR-026). Timeout POSTs `NAVIGATION_TIMEOUT`.
 - **`backendClient.js`**: Thin HTTP client. All calls to the backend go through here. If the backend is unreachable, sets `backendUnreachable: true` in storage and drops the request — no queuing, no aggressive retry.
 - **`contestPageScript.js`**: Runs on the contest homepage. Finds the 4 problem links (href-first, click-and-capture fallback). Never hardcodes URLs.
 - **`problemPageScript.js`**: Runs on each problem page. Uses `MutationObserver` to wait for "Users Accepted", does a double-read stability check, detects login walls, and sends the raw string to the background.
@@ -16,10 +16,10 @@ The Chrome extension scrapes raw "Users Accepted" strings from LeetCode and POST
 ### Backend Side
 - **`AcceptanceStatsParser.java`**: Converts `"28,903 / 31.1K"` to two `BigDecimal` values. Uses `BigDecimal` multiplication for K/M/B — never `double`.
 - **`AcceptanceCalculationService.java`**: `acceptedUsers × 100 / totalUsers`, scale 10, HALF_UP. Zero `totalUsers` throws — never store 0%.
-- **`ContestStateService.java`**: The heart of the backend. A `synchronized` method wraps deep-copy → parse → calculate → `RankingService.computeRanking` → `ComparisonService.detectOvertakes` → `AtomicReference.set()`. This is the only place a new `ContestStats` snapshot is published.
+- **`ContestStateService.java`**: The heart of the backend. A `synchronized` method wraps deep-copy → parse → calculate → ranking → overtakes → `ContestLifecycleService.nextLifecycleState` → `AtomicReference.set()`. This is the only place a new `ContestStats` snapshot is published.
 - **`RankingService.java`**: Ranks Q1–Q4 by `usersAcceptedPercentage` descending (ADR-022). Ties by question number. Null percentages last. No I/O; called only from the critical section.
 - **`ComparisonService.java`**: Pairwise percentages (ADR-023). Emits `RankingChange` only on Qx <= Qy → Qx > Qy (EQ counts as <=). Dedup via `pairwiseRelationships` on the snapshot. Null % keeps the prior relation so one PARSE_ERROR cannot wipe others.
-- **`ContestLifecycleService.java`**: Phase 11 — watches for 3 consecutive unchanged cycles across all 4 questions → marks contest ENDED. The extension already has `handleContestEnded()` (Phase 7) waiting for that signal.
+- **`ContestLifecycleService.java`**: After 3 consecutive complete Q1–Q4 rounds with identical non-null percentages, returns `ENDED` (ADR-006). PARSE_ERROR / null % resets the streak. Reset on `initializeContest`.
 - **`ContestStatusController.java`**: Lock-free `GET /api/contest/status`. Empty envelope when uninitialized (ADR-025).
 - **`sidepanel.js` / `popup.js`**: Poll/render ranking, percentages, overtakes. Backend-unreachable is a banner, not a crash.
 
@@ -65,6 +65,7 @@ Follow a single value from cycle start to snapshot:
    - Non-SUCCESS (incl. `NAVIGATION_TIMEOUT`): clear metric fields, keep extension status
    - `RankingService.computeRanking(updatedQuestions)` — descending %, null last (ADR-022)
    - `ComparisonService.detectOvertakes(previous, current, pairwise, recentChanges)` — Section 18 / ADR-023
+   - `ContestLifecycleService.nextLifecycleState` — ENDED after 3 unchanged complete rounds (ADR-006)
    - `currentStats.set(newSnapshot)`
    - **Critical section ends**
 
@@ -84,7 +85,7 @@ Follow a single value from cycle start to snapshot:
 | `LOGIN_WALL` status | User is not logged into LeetCode in Chrome | Check if LeetCode session cookie is present | Log in to LeetCode and reload the problem tab |
 | Cycling never starts | Is `cycleInProgress` stuck at `true` in storage? | SW start should `recoverOrphanedCycleGuard()` — check that ran; otherwise clear storage and reload | Check `alarmScheduler.js` / `ensureMonitoringAlarm` |
 | Interval change does nothing | Did Save persist `monitoringIntervalMinutes`? | SW log for `MONITORING_INTERVAL_SAVED` | Alarm only re-registers after Q1–Q4 tabs exist |
-| Alarm keeps firing after contest ends | Phase 11 has not called `handleContestEnded` yet | ENDED is not computed until `ContestLifecycleService` | Do not invent detection in the extension |
+| Alarm keeps firing after contest ends | Did health/status show `lifecycleState=ENDED`? | Post-cycle `observeEndedAndStop` / side-panel `CONTEST_ENDED` | Hook must be `handleContestEnded` only (ADR-026) |
 | Alarm returns after ENDED + reload | Is `monitoringStopped` still true? | `ensureMonitoringAlarm` must no-op when stopped | Check `stopMonitoringAlarm` wrote storage |
 | Only one question updates under load | Four POSTs must all finish — check `ContestStateServiceConcurrencyTest` | Was `applyIngest` mutating snapshot objects in place? (torn read) | Confirm method is `synchronized` and copies `QuestionStats` |
 | Percentage set but counts null | Deep-copy missing — reader held a mutating object | Check `copyQuestionStats` is used for all four slots | Run `concurrentIngest_withConcurrentReads_snapshotAlwaysConsistent` |

@@ -138,3 +138,9 @@
 - Decision: `GET /api/contest/status` returns 200 with `initialized: false` and empty collections when `getCurrentStats()` is null. Configured snapshots add `initialized: true` plus ContestStats fields.
 - Rationale: A 404/500 would look like backend-unreachable (ADR-009).
 - Consequences: UI keys off `initialized` and `backendUnreachable`, not HTTP status alone.
+
+## ADR-026: ENDED Stops via Phase 7 Hook After Status/Health Observe
+- Context: ADR-006 detects ENDED on the backend. ADR-021 already exported `handleContestEnded` / `CONTEST_ENDED`. Must not invent a second alarm-clear path.
+- Decision: After each scrape cycle, `observeEndedAndStop()` reads `GET /api/contest/status`. Side panel and popup also send `{ type: "CONTEST_ENDED" }` when they see `lifecycleState === "ENDED"`. SW startup uses `GET /health` (`observeEndedFromHealth`). All three call `handleContestEnded()` → `stopMonitoringAlarm()`.
+- Rationale: The backend is the detector; the extension only observes. One hook keeps `monitoringStopped` consistent across SW restarts.
+- Consequences: Up to one extra cycle can run after ENDED until the post-cycle status read (or the 5s UI poll). No ingest-response field was added — status/health already carry `lifecycleState`.

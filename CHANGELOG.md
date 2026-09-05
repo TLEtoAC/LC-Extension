@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+## Phase 11 — Robustness + Lifecycle (2026-09-05)
+**Lead:** Backend/Core + Extension/Background + Edge-Case Red Team | **Reviewer:** Architect
+**Side:** backend/ + extension/
+- [x] ContestLifecycleService — 3 identical Q1–Q4 percentage rounds → `lifecycleState=ENDED` (ADR-006)
+- [x] ENDED stop path: `observeEndedAndStop` / side-panel poll / startup health → existing `handleContestEnded` (ADR-021 / ADR-026)
+- [x] `recoverMissingTabs` reopens closed Q1–Q4 tabs from `discoveredQuestions`
+- [x] JUnit lifecycle tests; Jest tabLifecycle / backendClient / ENDED hook (8)
+
 ## Phase 10 — Status/Health API + Side Panel UI (2026-09-05)
 **Lead:** REST API + UI Agents | **Reviewer:** Architect
 **Side:** backend/ + extension/

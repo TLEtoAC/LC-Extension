@@ -50,7 +50,7 @@ Factual record of which LLM ran which council role in this repo, versus the pair
 | 8. State + Ranking | Backend/Core | Edge-Case Red Team | **Cursor Grok 4.6** parent Architect + inherit implementer (Backend/Core + Testing/QA + Docs + Red Team) |
 | 9. Overtaking Detection | Backend/Core | Testing/QA | **Cursor Grok 4.6** inherit (Backend/Core + Testing/QA + Docs) |
 | 10. Status/Health + UI | REST API + UI | Architect | **Cursor Grok 4.6** inherit (REST/UI + Docs) |
-| 11. Robustness + Lifecycle | Backend/Core + Ext/Background + Red Team | Architect | In progress this session. Cursor Grok 4.6 inherit. |
+| 11. Robustness + Lifecycle | Backend/Core + Ext/Background + Red Team | Architect | **Cursor Grok 4.6** inherit (Backend/Core + Extension/Background + Testing + Docs + Red Team) |
 
 ---
 
@@ -85,6 +85,7 @@ Also **Cursor Grok 4.6** (`inherit`):
 
 - Architect + Backend/Core + REST/UI + Testing + Docs + Edge-Case Red Team — simulated in one implementer
 - Branch: `feat/phases-8-11` (from `phase1` @ `8dbe9f8`)
+- Phases 8–11 all landed in this session on Cursor Grok 4.6 (`inherit`)
 
 ---
 

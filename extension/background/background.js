@@ -23,18 +23,13 @@
 
 import {
   openOrReuseTab,
-  reloadTab,
   getPersistedTabIds,
   setPersistedTabIds,
-  getCycleInProgress,
-  setCycleInProgress,
-  recoverMissingTabs
+  getCycleInProgress
 } from './tabLifecycleManager.js';
 import {
-  checkHealth,
   postConfig,
   postIngest,
-  getStatus,
   normalizeQuestionSlot
 } from './backendClient.js';
 import {
@@ -46,7 +41,8 @@ import {
   handleContestEnded,
   ensureMonitoringAlarm,
   recoverOrphanedCycleGuard,
-  isMonitoringStopped
+  isMonitoringStopped,
+  observeEndedFromHealth
 } from './alarmScheduler.js';
 
 // ─── onInstalled ─────────────────────────────────────────────────────────────
@@ -581,8 +577,10 @@ chrome.alarms.onAlarm.addListener(onAlarm);
 async function runStartupChecks() {
   console.log('[background] Service worker started — running startup checks.');
   await recoverOrphanedCycleGuard();
-  await ensureMonitoringAlarm();
-  await checkHealth();
+  const ended = await observeEndedFromHealth();
+  if (!ended) {
+    await ensureMonitoringAlarm();
+  }
 }
 
 runStartupChecks();

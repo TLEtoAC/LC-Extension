@@ -126,7 +126,9 @@ Side panel polls this every 5 seconds. `fetch` failure → "Backend not running"
   "questionStatuses": { "Q1": "SUCCESS", "Q2": null, "Q3": null, "Q4": null }
 }
 ```
-`lifecycleState` is `UNINITIALISED` until `POST /config`. `lastIngestReceivedAt` is each slot's last scrape timestamp — a stalled extension vs a stalled backend is distinguishable from this payload alone.
+`lifecycleState` is `UNINITIALISED` until `POST /config`, then `MONITORING`, then `ENDED` after three consecutive complete ingest rounds with unchanged percentages (ADR-006). `lastIngestReceivedAt` is each slot's last scrape timestamp — a stalled extension vs a stalled backend is distinguishable from this payload alone.
+
+When the extension sees `lifecycleState: ENDED` (post-cycle status poll, side-panel/popup poll, or startup health), it calls `handleContestEnded()` — the only alarm-stop path (ADR-026).
 
 ## Scraping Status Values
 | Status | Meaning |
@@ -153,8 +155,8 @@ Side panel polls this every 5 seconds. `fetch` failure → "Backend not running"
 | File | Purpose |
 |---|---|
 | `background/background.js` | Service worker — discovery, `handleScrapeResult` → `postIngest`, interval re-register, `CONTEST_ENDED` hook, SW alarm restore |
-| `background/tabLifecycleManager.js` | 4-tab persistence, reload cycle, recovery |
-| `background/alarmScheduler.js` | Configurable `scrapeCycle` (default 5 min, clamp 1–60); `runScrapeCycle` Q1→Q4; pending-scrape map; `stopMonitoringAlarm` / `handleContestEnded` Phase 11 hook; 20s `NAVIGATION_TIMEOUT` |
+| `background/tabLifecycleManager.js` | 4-tab persistence, reload cycle, `recoverMissingTabs` |
+| `background/alarmScheduler.js` | Configurable `scrapeCycle`; post-cycle ENDED observe → `handleContestEnded`; 20s `NAVIGATION_TIMEOUT` |
 | `background/backendClient.js` | HTTP client; `postIngest` normalizes slot to `Qn` |
 | `content-scripts/contestPageScript.js` | Contest homepage discovery |
 | `content-scripts/problemPageScript.js` | Problem page scraping |
@@ -173,7 +175,7 @@ Side panel polls this every 5 seconds. `fetch` failure → "Backend not running"
 | `RankingService.java` | Descending % ranking (null last, ties by Qn) |
 | `AcceptanceCalculationService.java` | BigDecimal percentage |
 | `ComparisonService.java` | Pairwise overtake detection (Qx <= Qy → Qx > Qy, ADR-023) |
-| `ContestLifecycleService.java` | Signal-based ENDED detection |
+| `ContestLifecycleService.java` | 3 unchanged Q1–Q4 rounds → ENDED (ADR-006) |
 | `AcceptanceStatsParser.java` | Raw string → BigDecimal |
 | `CorsConfig.java` | CORS restricted to extension origin |
 

@@ -9,7 +9,8 @@
 
 | Component | Status |
 |---|---|
-| Backend (`mvn test`) | ✅ **82 / 82 tests passing** |
+| Backend (`mvn test`) | ✅ **87 / 87 tests passing** |
+| Extension (Jest) | ✅ **8 / 8 tests passing** |
 | Extension (syntax check) | ✅ All JS files pass `node --check` |
 | GitHub (`origin/phase1`) | ✅ Latest commit: `5c0ea2e` |
 
@@ -31,7 +32,7 @@
 | 8 | State + Ranking | Backend/Core Agent | ✅ Done | `RankingService` descending %; 72 tests |
 | 9 | Overtaking Detection | Backend/Core Agent | ✅ Done | `ComparisonService` pairwise; 79 tests |
 | 10 | Status/Health API + Side Panel UI | REST API + UI Agents | ✅ Done | status + health + side panel/popup |
-| 11 | Robustness + Lifecycle | Backend/Core + Ext/Background + Edge-Case Red Team | 🔲 Pending | — |
+| 11 | Robustness + Lifecycle | Backend/Core + Ext/Background + Edge-Case Red Team | ✅ Done | ENDED + recoverMissingTabs; 87 JUnit + 8 Jest |
 | — | Continuous Docs | Logging/Docs Agent | 🔄 Active | All 5 artifacts maintained |
 
 ---
@@ -45,8 +46,8 @@
 | `manifest.json` | 2 | MV3 manifest — permissions, side panel, content script patterns, key placeholder |
 | `package.json` | 2 | Jest ^29 test config |
 | `background/background.js` | 2 / 3c / 6 / 7 / 10 | Service worker — discovery, ingest, interval, `CONTEST_ENDED`, `OPEN_SIDE_PANEL` |
-| `background/tabLifecycleManager.js` | 2 | Tab persistence (storage-backed), event-driven reload (`chrome.tabs.onUpdated`), `cycleInProgress` guard |
-| `background/alarmScheduler.js` | 6 / 7 | Configurable `scrapeCycle`; sequential `runScrapeCycle`; pending-scrape map; `stopMonitoringAlarm` / `handleContestEnded`; 20s `NAVIGATION_TIMEOUT` |
+| `background/tabLifecycleManager.js` | 2 / 11 | Tab persistence, event-driven reload, `recoverMissingTabs` |
+| `background/alarmScheduler.js` | 6 / 7 / 11 | scrapeCycle; recover tabs; `observeEndedAndStop` → `handleContestEnded` |
 | `background/backendClient.js` | 2 / 6 / 10 | `fetch()` wrapper — ingest + `getStatus` / `checkHealth` |
 | `content-scripts/contestPageScript.js` | 3a | Contest homepage discovery — `MutationObserver`, href-first + click-and-capture fallback, 5 selector strategies |
 | `content-scripts/problemPageScript.js` | 4 | Problem page scraper — `MutationObserver`, 3-tier selector chain, double-read stability, login-wall & 404 detection |
@@ -55,6 +56,9 @@
 | `ui/sidepanel.html/js/css` | 10 | Dashboard — 5s status poll, ranking, overtakes, unreachable/empty/ENDED |
 | `ui/popup.html/js` | 10 | Lightweight ranking + open side panel |
 | `tests/httpBoundaryProof.md` | 2 | Manual test guide for the extension↔backend HTTP boundary |
+| `tests/tabLifecycle.test.js` | 11 | Jest — cycleInProgress + recoverMissingTabs |
+| `tests/backendClient.test.js` | 11 | Jest — Qn normalize, drop-on-unreachable, refused fetch |
+| `tests/alarmEnded.test.js` | 11 | Jest — ENDED observe uses Phase 7 hook |
 
 ### Backend (`backend/`)
 
@@ -78,9 +82,10 @@
 | `parser/ParsedAcceptance.java` | 5 | Record: `BigDecimal acceptedUsers`, `BigDecimal totalUsers` |
 | `parser/ParseException.java` | 5 | Unchecked (`IllegalArgumentException`) for malformed input |
 | `service/AcceptanceCalculationService.java` | 6 | `acceptedUsers × 100 / totalUsers`, scale 10 HALF_UP; zero total throws |
-| `service/ContestStateService.java` | 3b / 4 / 6 / 8 / 9 | `synchronized applyIngest`: deep-copy, parse, calculate, ranking, overtakes, publish |
+| `service/ContestStateService.java` | 3b / 4 / 6 / 8 / 9 / 11 | `synchronized applyIngest`: parse, rank, overtakes, lifecycle, publish |
 | `service/RankingService.java` | 8 | Descending % ranking; null last; ties by Qn |
 | `service/ComparisonService.java` | 9 | Pairwise Qx <= Qy → Qx > Qy; snapshot pairwise map dedup |
+| `service/ContestLifecycleService.java` | 11 | 3 identical complete rounds → ENDED |
 
 ### Test Suite (`backend/src/test/`)
 
@@ -97,14 +102,16 @@
 | `ContestStateServiceRankingTest` | 3 | 8 | Empty on init, snapshot publish, PARSE_ERROR last |
 | `ComparisonServiceTest` | 5 | 9 | Overtake, no-duplicate, tie, PARSE_ERROR isolation, lead→tie |
 | `ContestStateServiceOvertakeTest` | 2 | 9 | Snapshot publish + no duplicate after unchanged ingest |
-| **Total** | **82** | — | **100% passing** |
+| `ContestLifecycleServiceUnitTest` | 3 | 11 | 3-cycle ENDED, change reset, PARSE_ERROR no-end |
+| `ContestStateServiceLifecycleTest` | 2 | 11 | applyIngest publishes ENDED; change keeps MONITORING |
+| **Total** | **87** | — | **100% passing** |
 
 ### Knowledge Artifacts (repo root)
 
 | File | Status |
 |---|---|
-| `CHANGELOG.md` | ✅ Current through Phase 7 |
-| `DECISIONS.md` | ✅ ADR-001–025 (status envelope, localhost host_permissions) |
+| `CHANGELOG.md` | ✅ Current through Phase 11 |
+| `DECISIONS.md` | ✅ ADR-001–026 (ENDED observe → Phase 7 hook) |
 | `FLOW.md` | ✅ Cross-process sequence + interval / ENDED / SW-restart |
 | `DOCUMENTATION.md` | ✅ Setup, REST API contract, interval options, security notes |
 | `LEARN.md` | ✅ End-to-end trace + debugging index |
@@ -129,13 +136,8 @@ Done. `ComparisonService` emits `RankingChange` only on Qx <= Qy → Qx > Qy (ti
 ### Phase 10 — Status/Health API + Side Panel UI ✅
 Done. Lock-free `GET /api/contest/status` (empty envelope if uninitialized). Health includes `lastIngestReceivedAt` and `lifecycleState`. Side panel polls every 5s; popup is a ranking fallback. Backend-unreachable is a banner (ADR-009). CORS still pinned — localhost added only to extension `host_permissions` (ADR-024).
 
-### Phase 11 — Robustness + Lifecycle
-**Lead:** Backend/Core + Extension/Background + Edge-Case Red Team | **Reviewer:** Architect
-- `ContestLifecycleService.java` — signal-based ENDED detection (3 unchanged cycles)
-- Call existing Phase 7 hook: `handleContestEnded()` or `{ type: "CONTEST_ENDED" }` when health/status reports ENDED
-- `TAB_MISSING` recovery in `tabLifecycleManager.js`
-- `extension/tests/tabLifecycle.test.js` + `backendClient.test.js` (Jest)
-- Final Edge-Case Red Team review
+### Phase 11 — Robustness + Lifecycle ✅
+Done. `ContestLifecycleService` marks ENDED after 3 identical Q1–Q4 percentage rounds (ADR-006). Extension observes via post-cycle status, UI poll, or startup health and stops **only** through `handleContestEnded` (ADR-026). `recoverMissingTabs` reopens closed slots. Jest 8 + JUnit 87.
 
 ---
 
@@ -152,7 +154,14 @@ mvn spring-boot:run
 ```bash
 cd backend
 mvn test
-# Expected: 82 tests, 0 failures
+# Expected: 87 tests, 0 failures
+
+### Run Extension Jest
+```bash
+cd extension
+npm test
+# Expected: 8 tests, 0 failures
+```
 ```
 
 ### Load the Extension

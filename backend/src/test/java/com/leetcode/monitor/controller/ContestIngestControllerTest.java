@@ -16,6 +16,7 @@ import com.leetcode.monitor.parser.AcceptanceStatsParser;
 import com.leetcode.monitor.service.AcceptanceCalculationService;
 import com.leetcode.monitor.service.ContestStateService;
 import com.leetcode.monitor.service.ComparisonService;
+import com.leetcode.monitor.service.ContestLifecycleService;
 import com.leetcode.monitor.service.RankingService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -272,7 +273,8 @@ public class ContestIngestControllerTest {
                 new AcceptanceStatsParser(),
                 new AcceptanceCalculationService(),
                 new RankingService(),
-                new ComparisonService()
+                new ComparisonService(),
+                new ContestLifecycleService()
         );
         ContestIngestController controller = new ContestIngestController(uninitializedService);
         ContestIngestRequest request = new ContestIngestRequest("10 / 20", ScrapingStatus.SUCCESS);
