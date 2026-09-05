@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+## Phase 9 — Overtaking Detection (2026-09-05)
+**Lead:** Backend/Core Agent | **Reviewer:** Testing/QA
+**Side:** backend/
+- [x] ComparisonService.java — pairwise Qx <= Qy → Qx > Qy (ties included); pairwise map dedup; null % keeps prior relation
+- [x] ContestStateService.applyIngest — overtakes inside the same synchronized publish
+- [x] ComparisonServiceTest + ContestStateServiceOvertakeTest; concurrency suite still green
+
 ## Phase 8 — State + Ranking (2026-09-05)
 **Lead:** Backend/Core Agent | **Reviewer:** Edge-Case Red Team
 **Side:** backend/

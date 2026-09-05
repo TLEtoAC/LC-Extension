@@ -120,3 +120,9 @@
 - Decision: `ranking[]` is question numbers sorted by `usersAcceptedPercentage` **descending** (highest acceptance first). Ties break by question number ascending (`Q1` before `Q2`). Null percentages (PARSE_ERROR, NAVIGATION_TIMEOUT, not yet scraped) sort last and never throw.
 - Rationale: Matches the existing snapshot contract and the overtake language ("Q4 overtook Q3" = Q4's % moved above Q3's). `BigDecimal.compareTo` only.
 - Consequences: The dashboard "rank 1" is the easiest (highest %) question, not the hardest.
+
+## ADR-023: Pairwise Overtake Is Percentage Transition, Not Rank Hop
+- Context: Section 18 says only report Qx <= Qy → Qx > Qy, ties included. Ranking order (ADR-022) is a display sort.
+- Decision: `ComparisonService` compares `usersAcceptedPercentage` pairwise. Canonical key `QavsQb` (a < b) stores how Qa compares to Qb (`GT`/`LT`/`EQ`). An event fires only when a stored relation flips across that inequality (EQ counts as <=). First observation stores the relation and emits nothing. Null percentage skips that pair and keeps the previous relation.
+- Rationale: Dedup lives on the snapshot's `pairwiseRelationships`. PARSE_ERROR on one slot must not wipe or re-emit other pairs.
+- Consequences: Becoming tied (GT/LT → EQ) is not an overtake. History is newest-first, capped at 20.

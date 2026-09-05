@@ -16,9 +16,9 @@ The Chrome extension scrapes raw "Users Accepted" strings from LeetCode and POST
 ### Backend Side
 - **`AcceptanceStatsParser.java`**: Converts `"28,903 / 31.1K"` to two `BigDecimal` values. Uses `BigDecimal` multiplication for K/M/B — never `double`.
 - **`AcceptanceCalculationService.java`**: `acceptedUsers × 100 / totalUsers`, scale 10, HALF_UP. Zero `totalUsers` throws — never store 0%.
-- **`ContestStateService.java`**: The heart of the backend. A `synchronized` method wraps deep-copy → parse → calculate → `RankingService.computeRanking` → overtake stub (Phase 9) → `AtomicReference.set()`. This is the only place a new `ContestStats` snapshot is published.
+- **`ContestStateService.java`**: The heart of the backend. A `synchronized` method wraps deep-copy → parse → calculate → `RankingService.computeRanking` → `ComparisonService.detectOvertakes` → `AtomicReference.set()`. This is the only place a new `ContestStats` snapshot is published.
 - **`RankingService.java`**: Ranks Q1–Q4 by `usersAcceptedPercentage` descending (ADR-022). Ties by question number. Null percentages last. No I/O; called only from the critical section.
-- **`ComparisonService.java`**: Compares all pairs (Qi, Qj). Only emits a `RankingChange` when a relationship flips (e.g., Q3 was below Q1, now above). Handles ties.
+- **`ComparisonService.java`**: Pairwise percentages (ADR-023). Emits `RankingChange` only on Qx <= Qy → Qx > Qy (EQ counts as <=). Dedup via `pairwiseRelationships` on the snapshot. Null % keeps the prior relation so one PARSE_ERROR cannot wipe others.
 - **`ContestLifecycleService.java`**: Phase 11 — watches for 3 consecutive unchanged cycles across all 4 questions → marks contest ENDED. The extension already has `handleContestEnded()` (Phase 7) waiting for that signal.
 
 ## Full-Cycle Trace: One Scraped Value, Both Processes
@@ -62,7 +62,7 @@ Follow a single value from cycle start to snapshot:
      - `ParseException` or zero-total `IllegalArgumentException` → `PARSE_ERROR`, metrics nulled
    - Non-SUCCESS (incl. `NAVIGATION_TIMEOUT`): clear metric fields, keep extension status
    - `RankingService.computeRanking(updatedQuestions)` — descending %, null last (ADR-022)
-   - TODO(Phase 9): `recentChanges` / `pairwiseRelationships` copied
+   - `ComparisonService.detectOvertakes(previous, current, pairwise, recentChanges)` — Section 18 / ADR-023
    - `currentStats.set(newSnapshot)`
    - **Critical section ends**
 

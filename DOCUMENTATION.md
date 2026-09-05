@@ -87,7 +87,8 @@ Returns the latest ContestStats snapshot.
   "lastUpdated": "2024-01-01T12:00:00Z",
   "questions": [ ... ],
   "ranking": ["Q4", "Q2", "Q1", "Q3"],
-  "recentChanges": [ { "description": "Q3 overtook Q1", "timestamp": "..." } ]
+  "recentChanges": [ { "description": "Q4 overtook Q3", "questionNumberOvertaker": "Q4", "questionNumberOvertaken": "Q3", "timestamp": "..." } ],
+  "pairwiseRelationships": { "Q1vsQ2": "GT", "Q3vsQ4": "LT" }
 }
 ```
 `ranking` is question numbers by `usersAcceptedPercentage` **descending** (highest first). Equal percentages break by question number (`Q1` before `Q2`). Slots with a null percentage (PARSE_ERROR, timeout, not yet scraped) are listed last. Empty until the first ingest.
@@ -146,7 +147,7 @@ Returns the latest ContestStats snapshot.
 | `ContestStateService.java` | Critical section, AtomicReference snapshot |
 | `RankingService.java` | Descending % ranking (null last, ties by Qn) |
 | `AcceptanceCalculationService.java` | BigDecimal percentage |
-| `ComparisonService.java` | Pairwise overtake detection |
+| `ComparisonService.java` | Pairwise overtake detection (Qx <= Qy → Qx > Qy, ADR-023) |
 | `ContestLifecycleService.java` | Signal-based ENDED detection |
 | `AcceptanceStatsParser.java` | Raw string → BigDecimal |
 | `CorsConfig.java` | CORS restricted to extension origin |

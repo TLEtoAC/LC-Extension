@@ -9,7 +9,7 @@
 
 | Component | Status |
 |---|---|
-| Backend (`mvn test`) | ✅ **72 / 72 tests passing** |
+| Backend (`mvn test`) | ✅ **79 / 79 tests passing** |
 | Extension (syntax check) | ✅ All JS files pass `node --check` |
 | GitHub (`origin/phase1`) | ✅ Latest commit: `5c0ea2e` |
 
@@ -29,7 +29,7 @@
 | 6 | Four Questions + Concurrency | Extension/Background + Backend/Core Agents | ✅ Done | alarm + first cycle pulled into this phase (ADR-015) |
 | 7 | Alarm Scheduler | Extension/Background Agent | ✅ Done | Interval 1–60 + ENDED hook (`feat/phase7-alarm-polish`); core loop was Phase 6 (ADR-015) |
 | 8 | State + Ranking | Backend/Core Agent | ✅ Done | `RankingService` descending %; 72 tests |
-| 9 | Overtaking Detection | Backend/Core Agent | 🔲 Pending | — |
+| 9 | Overtaking Detection | Backend/Core Agent | ✅ Done | `ComparisonService` pairwise; 79 tests |
 | 10 | Status/Health API + Side Panel UI | REST API + UI Agents | 🔲 Pending | — |
 | 11 | Robustness + Lifecycle | Backend/Core + Ext/Background + Edge-Case Red Team | 🔲 Pending | — |
 | — | Continuous Docs | Logging/Docs Agent | 🔄 Active | All 5 artifacts maintained |
@@ -75,8 +75,9 @@
 | `parser/ParsedAcceptance.java` | 5 | Record: `BigDecimal acceptedUsers`, `BigDecimal totalUsers` |
 | `parser/ParseException.java` | 5 | Unchecked (`IllegalArgumentException`) for malformed input |
 | `service/AcceptanceCalculationService.java` | 6 | `acceptedUsers × 100 / totalUsers`, scale 10 HALF_UP; zero total throws |
-| `service/ContestStateService.java` | 3b / 4 / 6 / 8 | `synchronized applyIngest`: deep-copy, parse, calculate, ranking, overtake stub, publish |
+| `service/ContestStateService.java` | 3b / 4 / 6 / 8 / 9 | `synchronized applyIngest`: deep-copy, parse, calculate, ranking, overtakes, publish |
 | `service/RankingService.java` | 8 | Descending % ranking; null last; ties by Qn |
+| `service/ComparisonService.java` | 9 | Pairwise Qx <= Qy → Qx > Qy; snapshot pairwise map dedup |
 
 ### Test Suite (`backend/src/test/`)
 
@@ -90,14 +91,16 @@
 | `ContestStateServiceConcurrencyTest` | 4 | 6 / 8 | 4 simultaneous ingests, last-write-wins, isolated parse failure, concurrent readers + ranking |
 | `RankingServiceTest` | 5 | 8 | Descending order, ties, null %, all-null, empty input |
 | `ContestStateServiceRankingTest` | 3 | 8 | Empty on init, snapshot publish, PARSE_ERROR last |
-| **Total** | **72** | — | **100% passing** |
+| `ComparisonServiceTest` | 5 | 9 | Overtake, no-duplicate, tie, PARSE_ERROR isolation, lead→tie |
+| `ContestStateServiceOvertakeTest` | 2 | 9 | Snapshot publish + no duplicate after unchanged ingest |
+| **Total** | **79** | — | **100% passing** |
 
 ### Knowledge Artifacts (repo root)
 
 | File | Status |
 |---|---|
 | `CHANGELOG.md` | ✅ Current through Phase 7 |
-| `DECISIONS.md` | ✅ ADR-001–022 (ranking descending %, null last) |
+| `DECISIONS.md` | ✅ ADR-001–023 (ranking + pairwise overtake) |
 | `FLOW.md` | ✅ Cross-process sequence + interval / ENDED / SW-restart |
 | `DOCUMENTATION.md` | ✅ Setup, REST API contract, interval options, security notes |
 | `LEARN.md` | ✅ End-to-end trace + debugging index |
@@ -116,10 +119,8 @@ Done on `feat/phase7-alarm-polish`. Core `alarmScheduler.js` landed in Phase 6 (
 ### Phase 8 — State + Ranking ✅
 Done. `RankingService` ranks by `usersAcceptedPercentage` descending (ADR-022). Ties by question number. Null percentages last. Ranking is computed inside the same `synchronized applyIngest` and published on the snapshot.
 
-### Phase 9 — Overtaking Detection
-**Lead:** Backend/Core Agent | **Reviewer:** Testing/QA Agent
-- `ComparisonService.java` — pairwise transition detection, tie handling, no duplicates
-- `ComparisonServiceTest.java` — overtake, no-duplicate, tie, all-equal scenarios
+### Phase 9 — Overtaking Detection ✅
+Done. `ComparisonService` emits `RankingChange` only on Qx <= Qy → Qx > Qy (ties included, ADR-023). Dedup via snapshot `pairwiseRelationships`. One PARSE_ERROR does not wipe other pairs. Same synchronized publish as ranking.
 
 ### Phase 10 — Status/Health API + Side Panel UI
 **Lead:** REST API Agent + UI Agent | **Reviewer:** Architect
@@ -151,7 +152,7 @@ mvn spring-boot:run
 ```bash
 cd backend
 mvn test
-# Expected: 72 tests, 0 failures
+# Expected: 79 tests, 0 failures
 ```
 
 ### Load the Extension

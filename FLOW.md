@@ -76,7 +76,7 @@ sequenceDiagram
             SVC->>SVC: deep-copy QuestionStats
             SVC->>SVC: parse + calculatePercentage
             SVC->>SVC: RankingService.computeRanking (desc %, null last)
-            SVC->>SVC: overtakes = previous (TODO Phase 9)
+            SVC->>SVC: ComparisonService.detectOvertakes (Qx<=Qy → Qx>Qy)
             SVC->>REF: AtomicReference.set(newSnapshot)
             SVC-->>API: QuestionStats
             API-->>BC: 200 + acceptedUsers, totalUsers, usersAcceptedPercentage

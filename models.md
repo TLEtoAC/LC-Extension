@@ -48,7 +48,8 @@ Factual record of which LLM ran which council role in this repo, versus the pair
 | 6. Four questions + concurrency | Extension/Background + Backend/Core | Edge-Case Red Team | **Cursor Grok 4.6** parent Architect + inherit subagents (explore, implementer covering Backend/Core, Extension/Background, Testing/QA, Logging/Docs, Edge-Case Red Team) |
 | 7. Alarm Scheduler | Extension/Background | Architect | **Cursor Grok 4.6** parent Architect + inherit Phase 7 implementer (Extension/Background lead; Architect review) |
 | 8. State + Ranking | Backend/Core | Edge-Case Red Team | **Cursor Grok 4.6** parent Architect + inherit implementer (Backend/Core + Testing/QA + Docs + Red Team) |
-| 9–11 | See §31.2 | See §31.2 | In progress this session. Default remains Cursor Grok 4.6. |
+| 9. Overtaking Detection | Backend/Core | Testing/QA | **Cursor Grok 4.6** inherit (Backend/Core + Testing/QA + Docs) |
+| 10–11 | See §31.2 | See §31.2 | In progress this session. Default remains Cursor Grok 4.6. |
 
 ---
 
