@@ -8,7 +8,7 @@ The Chrome extension scrapes raw "Users Accepted" strings from LeetCode and POST
 ### Extension Side
 - **`background.js`**: The service worker. Wires together alarm events, message events, and the tab lifecycle. Think of it as the extension's main loop — but event-driven, not a literal loop.
 - **`tabLifecycleManager.js`**: Keeps 4 background tabs alive for Q1–Q4. Persists tab IDs to `chrome.storage.local` because the service worker can be killed and restarted at any time.
-- **`alarmScheduler.js`**: Registers `scrapeCycle` (5 min). `runScrapeCycle()` walks Q1→Q4 sequentially: register pending scrape → reload → wait 20s. Timeout POSTs `NAVIGATION_TIMEOUT`. Pending map lives in this module; `background.js` calls `resolvePendingScrape`.
+- **`alarmScheduler.js`**: Registers `scrapeCycle` at `monitoringIntervalMinutes` (default 5, clamp 1–60). `runScrapeCycle()` walks Q1→Q4 sequentially: register pending scrape → reload → wait 20s. Timeout POSTs `NAVIGATION_TIMEOUT`. `stopMonitoringAlarm()` / `handleContestEnded()` is the Phase 11 ENDED hook — no ENDED detection in this module. Pending map lives here; `background.js` calls `resolvePendingScrape`.
 - **`backendClient.js`**: Thin HTTP client. All calls to the backend go through here. If the backend is unreachable, sets `backendUnreachable: true` in storage and drops the request — no queuing, no aggressive retry.
 - **`contestPageScript.js`**: Runs on the contest homepage. Finds the 4 problem links (href-first, click-and-capture fallback). Never hardcodes URLs.
 - **`problemPageScript.js`**: Runs on each problem page. Uses `MutationObserver` to wait for "Users Accepted", does a double-read stability check, detects login walls, and sends the raw string to the background.
@@ -18,7 +18,7 @@ The Chrome extension scrapes raw "Users Accepted" strings from LeetCode and POST
 - **`AcceptanceCalculationService.java`**: `acceptedUsers × 100 / totalUsers`, scale 10, HALF_UP. Zero `totalUsers` throws — never store 0%.
 - **`ContestStateService.java`**: The heart of the backend. A `synchronized` method wraps deep-copy → parse → calculate → ranking stub (Phase 8) → overtake stub (Phase 9) → `AtomicReference.set()`. This is the only place a new `ContestStats` snapshot is published.
 - **`ComparisonService.java`**: Compares all pairs (Qi, Qj). Only emits a `RankingChange` when a relationship flips (e.g., Q3 was below Q1, now above). Handles ties.
-- **`ContestLifecycleService.java`**: Watches for 3 consecutive unchanged cycles across all 4 questions → marks contest ENDED.
+- **`ContestLifecycleService.java`**: Phase 11 — watches for 3 consecutive unchanged cycles across all 4 questions → marks contest ENDED. The extension already has `handleContestEnded()` (Phase 7) waiting for that signal.
 
 ## Full-Cycle Trace: One Scraped Value, Both Processes
 
@@ -79,7 +79,10 @@ Follow a single value from cycle start to snapshot:
 | Requests reach the backend but are rejected | CORS: is the extension ID in `CorsConfig.java` `EXTENSION_ORIGIN` correct? | Is the `"key"` field in `manifest.json` set? | Did you reload the extension after changing the key? |
 | Scraping returns `SELECTOR_NOT_FOUND` | Has LeetCode changed their DOM? | Check `problemPageScript.js` selector fallback chain | Try the aria-label fallback manually in DevTools |
 | `LOGIN_WALL` status | User is not logged into LeetCode in Chrome | Check if LeetCode session cookie is present | Log in to LeetCode and reload the problem tab |
-| Cycling never starts | Is `cycleInProgress` stuck at `true` in storage? | Service worker restarted mid-cycle — clear storage and reload | Check `alarmScheduler.js` alarm registration |
+| Cycling never starts | Is `cycleInProgress` stuck at `true` in storage? | SW start should `recoverOrphanedCycleGuard()` — check that ran; otherwise clear storage and reload | Check `alarmScheduler.js` / `ensureMonitoringAlarm` |
+| Interval change does nothing | Did Save persist `monitoringIntervalMinutes`? | SW log for `MONITORING_INTERVAL_SAVED` | Alarm only re-registers after Q1–Q4 tabs exist |
+| Alarm keeps firing after contest ends | Phase 11 has not called `handleContestEnded` yet | ENDED is not computed until `ContestLifecycleService` | Do not invent detection in the extension |
+| Alarm returns after ENDED + reload | Is `monitoringStopped` still true? | `ensureMonitoringAlarm` must no-op when stopped | Check `stopMonitoringAlarm` wrote storage |
 | Only one question updates under load | Four POSTs must all finish — check `ContestStateServiceConcurrencyTest` | Was `applyIngest` mutating snapshot objects in place? (torn read) | Confirm method is `synchronized` and copies `QuestionStats` |
 | Percentage set but counts null | Deep-copy missing — reader held a mutating object | Check `copyQuestionStats` is used for all four slots | Run `concurrentIngest_withConcurrentReads_snapshotAlwaysConsistent` |
 | Slot stays empty after a hung tab | Timeout must POST `NAVIGATION_TIMEOUT`, not skip | Check `waitForScrapeResult` 20s path | Backend `scrapingStatus` should be `NAVIGATION_TIMEOUT` |

@@ -27,7 +27,7 @@
 | 4 | Single-Q Scraping — `problemPageScript.js` + `ContestIngestController` | Content Script/DOM + REST API Agents | ✅ Done | `5c0ea2e` |
 | 5 | Parser Hardening — `AcceptanceStatsParser` + BigDecimal tests | Parser/Data Agent + Testing/QA Agent | ✅ Done | files present, 40 parser tests passing |
 | 6 | Four Questions + Concurrency | Extension/Background + Backend/Core Agents | ✅ Done | alarm + first cycle pulled into this phase (ADR-015) |
-| 7 | Alarm Scheduler | Extension/Background Agent | 🔲 Pending | Core loop landed in Phase 6; Phase 7 = interval config / ENDED stop |
+| 7 | Alarm Scheduler | Extension/Background Agent | ✅ Done | Interval 1–60 + ENDED hook (`feat/phase7-alarm-polish`); core loop was Phase 6 (ADR-015) |
 | 8 | State + Ranking | Backend/Core Agent | 🔲 Pending | — |
 | 9 | Overtaking Detection | Backend/Core Agent | 🔲 Pending | — |
 | 10 | Status/Health API + Side Panel UI | REST API + UI Agents | 🔲 Pending | — |
@@ -44,14 +44,14 @@
 |---|:---:|---|
 | `manifest.json` | 2 | MV3 manifest — permissions, side panel, content script patterns, key placeholder |
 | `package.json` | 2 | Jest ^29 test config |
-| `background/background.js` | 2 / 3c / 6 | Service worker — discovery, `handleScrapeResult` → `postIngest`, immediate first cycle, alarm dispatch |
+| `background/background.js` | 2 / 3c / 6 / 7 | Service worker — discovery, `handleScrapeResult` → `postIngest`, interval re-register, `CONTEST_ENDED` hook, SW alarm restore |
 | `background/tabLifecycleManager.js` | 2 | Tab persistence (storage-backed), event-driven reload (`chrome.tabs.onUpdated`), `cycleInProgress` guard |
-| `background/alarmScheduler.js` | 6 | `registerMonitoringAlarm`, sequential `runScrapeCycle`, pending-scrape map, 20s `NAVIGATION_TIMEOUT` |
+| `background/alarmScheduler.js` | 6 / 7 | Configurable `scrapeCycle`; sequential `runScrapeCycle`; pending-scrape map; `stopMonitoringAlarm` / `handleContestEnded`; 20s `NAVIGATION_TIMEOUT` |
 | `background/backendClient.js` | 2 / 6 | `fetch()` wrapper — `postIngest` normalizes `1`/`Q1` → `/ingest/Qn` |
 | `content-scripts/contestPageScript.js` | 3a | Contest homepage discovery — `MutationObserver`, href-first + click-and-capture fallback, 5 selector strategies |
 | `content-scripts/problemPageScript.js` | 4 | Problem page scraper — `MutationObserver`, 3-tier selector chain, double-read stability, login-wall & 404 detection |
-| `ui/options.html` | 2 | Contest URL input page |
-| `ui/options.js` | 2 | URL validation, `chrome.storage.local` persistence, sends `CONTEST_URL_SAVED` to SW |
+| `ui/options.html` | 2 / 7 | Contest URL + monitoring interval (1–60 min) |
+| `ui/options.js` | 2 / 7 | Persists URL + `monitoringIntervalMinutes`; `CONTEST_URL_SAVED` / `MONITORING_INTERVAL_SAVED` |
 | `tests/httpBoundaryProof.md` | 2 | Manual test guide for the extension↔backend HTTP boundary |
 
 ### Backend (`backend/`)
@@ -93,23 +93,22 @@
 
 | File | Status |
 |---|---|
-| `CHANGELOG.md` | ✅ Current through Phase 6 |
-| `DECISIONS.md` | ✅ ADR-001–019 (deep-copy, Phase 6/7 split, Qn normalize, 3 Architect decisions) |
-| `FLOW.md` | ✅ Cross-process sequence diagram |
-| `DOCUMENTATION.md` | ✅ Setup, REST API contract, security notes |
+| `CHANGELOG.md` | ✅ Current through Phase 7 |
+| `DECISIONS.md` | ✅ ADR-001–021 (deep-copy, Phase 6/7 split, Qn normalize, interval clamp, ENDED hook) |
+| `FLOW.md` | ✅ Cross-process sequence + interval / ENDED / SW-restart |
+| `DOCUMENTATION.md` | ✅ Setup, REST API contract, interval options, security notes |
 | `LEARN.md` | ✅ End-to-end trace + debugging index |
+| `models.md` | ✅ Agent Council role → plan model vs actual (Cursor Grok 4.6) |
 
 ---
 
-## What's Next (Phases 7–11)
+## What's Next (Phases 8–11)
 
 ### Phase 6 — Four Questions + Concurrency ✅
 Done. Immediate first cycle + 5-min alarm after discovery. `applyIngest` parses/calculates inside the synchronized critical section with deep-copied `QuestionStats`.
 
-### Phase 7 — Alarm Scheduler
-**Lead:** Extension/Background Agent | **Reviewer:** Architect
-- Core `alarmScheduler.js` already in Phase 6 (ADR-015)
-- Remaining: configurable interval, stop alarm on ENDED
+### Phase 7 — Alarm Scheduler ✅
+Done on `feat/phase7-alarm-polish`. Core `alarmScheduler.js` landed in Phase 6 (ADR-015). Phase 7: configurable interval (default 5, clamp 1–60). `stopMonitoringAlarm()` / `handleContestEnded()` / `CONTEST_ENDED` message ready for Phase 11. No fake ENDED detection (ADR-021). SW restart restores a missing alarm if still monitoring.
 
 ### Phase 8 — State + Ranking
 **Lead:** Backend/Core Agent | **Reviewer:** Edge-Case Red Team
@@ -131,6 +130,7 @@ Done. Immediate first cycle + 5-min alarm after discovery. `applyIngest` parses/
 ### Phase 11 — Robustness + Lifecycle
 **Lead:** Backend/Core + Extension/Background + Edge-Case Red Team | **Reviewer:** Architect
 - `ContestLifecycleService.java` — signal-based ENDED detection (3 unchanged cycles)
+- Call existing Phase 7 hook: `handleContestEnded()` or `{ type: "CONTEST_ENDED" }` when health/status reports ENDED
 - `TAB_MISSING` recovery in `tabLifecycleManager.js`
 - `extension/tests/tabLifecycle.test.js` + `backendClient.test.js` (Jest)
 - Final Edge-Case Red Team review

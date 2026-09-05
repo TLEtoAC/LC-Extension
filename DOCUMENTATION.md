@@ -30,7 +30,8 @@ Update the `EXTENSION_ORIGIN` constant in `backend/src/main/java/com/leetcode/mo
 ### 4. Configure the Contest URL
 1. Click the extension icon → options page
 2. Enter the LeetCode contest URL (e.g. `https://leetcode.com/contest/weekly-contest-400/`)
-3. Click Save — discovery begins automatically. After the 4 problem tabs open, the extension runs one scrape cycle immediately and registers the 5-minute alarm.
+3. Optionally set the monitoring interval (default 5 minutes, allowed 1–60)
+4. Click Save — discovery begins automatically when the contest URL is new or changed. After the 4 problem tabs open, the extension runs one scrape cycle immediately and registers `scrapeCycle` at the saved interval. Changing only the interval re-registers the alarm; it does not re-run discovery.
 
 ## Architecture
 
@@ -124,15 +125,15 @@ Returns the latest ContestStats snapshot.
 ### Extension
 | File | Purpose |
 |---|---|
-| `background/background.js` | Service worker — discovery, `handleScrapeResult` → `postIngest`, alarm dispatch |
+| `background/background.js` | Service worker — discovery, `handleScrapeResult` → `postIngest`, interval re-register, `CONTEST_ENDED` hook, SW alarm restore |
 | `background/tabLifecycleManager.js` | 4-tab persistence, reload cycle, recovery |
-| `background/alarmScheduler.js` | `registerMonitoringAlarm` (5 min, delay 0); `runScrapeCycle` Q1→Q4; pending-scrape map; 20s `NAVIGATION_TIMEOUT` |
+| `background/alarmScheduler.js` | Configurable `scrapeCycle` (default 5 min, clamp 1–60); `runScrapeCycle` Q1→Q4; pending-scrape map; `stopMonitoringAlarm` / `handleContestEnded` Phase 11 hook; 20s `NAVIGATION_TIMEOUT` |
 | `background/backendClient.js` | HTTP client; `postIngest` normalizes slot to `Qn` |
 | `content-scripts/contestPageScript.js` | Contest homepage discovery |
 | `content-scripts/problemPageScript.js` | Problem page scraping |
 | `ui/sidepanel.html/js/css` | Dashboard, polls backend every 5s |
 | `ui/popup.html/js` | Lightweight fallback |
-| `ui/options.html/js` | Contest URL configuration |
+| `ui/options.html/js` | Contest URL + scrape interval (1–60 min) |
 
 ### Backend
 | File | Purpose |
@@ -147,3 +148,8 @@ Returns the latest ContestStats snapshot.
 | `ContestLifecycleService.java` | Signal-based ENDED detection |
 | `AcceptanceStatsParser.java` | Raw string → BigDecimal |
 | `CorsConfig.java` | CORS restricted to extension origin |
+
+### Repo root
+| File | Purpose |
+|---|---|
+| `models.md` | Agent Council role → plan model vs the model that actually ran |

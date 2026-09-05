@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+## Phase 7 — Alarm Scheduler Polish (2026-09-05)
+**Lead:** Extension/Background Agent | **Reviewer:** Architect
+**Side:** extension/
+- [x] options.html / options.js — scrape interval input (default 5, clamp 1–60), persisted as `monitoringIntervalMinutes`
+- [x] alarmScheduler.js — `registerMonitoringAlarm` reads stored interval; `updateMonitoringInterval` clears + recreates `scrapeCycle`; `stopMonitoringAlarm` + `handleContestEnded` Phase 11 hook
+- [x] background.js — `MONITORING_INTERVAL_SAVED` / `CONTEST_ENDED`; SW start restores missing alarm, clears orphaned `cycleInProgress`
+- [x] models.md — Agent Council role → plan model vs actual model (Cursor Grok 4.6)
+
 ## Phase 6 — Four Questions + Concurrency (2026-09-05)
 **Lead:** Extension/Background Agent + Backend/Core Agent | **Reviewer:** Edge-Case Red Team
 **Side:** extension/ + backend/

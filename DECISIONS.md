@@ -103,3 +103,14 @@
 - Rationale: Same failure class as a malformed string — we do not have a usable percentage.
 - Consequences: Ingest HTTP status stays 200; the slot status is `PARSE_ERROR`.
 
+## ADR-020: Configurable Scrape Interval, Clamped 1–60 Minutes
+- Context: Section 10 says the interval is configurable from the options page with a 5-minute default. The master plan does not name a min/max. `chrome.alarms` will not schedule `periodInMinutes` below 1.
+- Decision: Persist `monitoringIntervalMinutes` in `chrome.storage.local`. Default 5. Clamp to 1–60 (integer minutes). Changing the interval clears `scrapeCycle` and creates a new alarm with `delayInMinutes = period` so the next tick follows the new cadence — it does **not** start an extra scrape cycle.
+- Rationale: 1 minute is Chrome's floor; 60 minutes is a personal-use ceiling so a typo cannot park the monitor for hours. Discovery still uses delay 0 + an explicit `runScrapeCycle()` (ADR-017).
+- Consequences: Interval-only saves must not re-fire `CONTEST_URL_SAVED` (that would re-run discovery). `registerMonitoringAlarm()` with no args reads storage.
+
+## ADR-021: ENDED Stops the Alarm via a Phase 11 Hook (No Fake Detection)
+- Context: Section 24B / ADR-006: stop `chrome.alarms` once lifecycle is ENDED. `ContestLifecycleService` (3 unchanged cycles) is Phase 11. Health/status do not yet return `lifecycleState: ENDED` (Phase 10/11).
+- Decision: Export `stopMonitoringAlarm()` and `handleContestEnded()`. Wire a `CONTEST_ENDED` runtime message. Persist `monitoringStopped: true` so a service-worker restart does not recreate `scrapeCycle`. Do **not** invent ENDED detection in Phase 7.
+- Rationale: Inventing a 3-cycle detector in the extension would duplicate Phase 11 and could false-stop on a static mid-contest snapshot.
+- Consequences: Until Phase 11 calls `handleContestEnded()` (or sends `CONTEST_ENDED`), the alarm keeps running after a real contest ends. Phase 11 must invoke the hook when health/status reports ENDED.

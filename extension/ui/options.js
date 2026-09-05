@@ -2,12 +2,12 @@
  * options.js — Options Page Controller
  *
  * Purpose : Handles user interaction on options.html. Validates and persists
- *           the contest URL to chrome.storage.local, then notifies the
- *           background service worker so it can kick off tab discovery
- *           (Phase 3).
+ *           the contest URL and scrape interval to chrome.storage.local, then
+ *           notifies the background service worker (discovery and/or alarm
+ *           re-registration).
  *
  * Author  : Extension/Background Agent
- * Phase   : 2 (scaffold + full implementation)
+ * Phase   : 7 (interval config)
  *
  * Context : Runs in the extension Options Page renderer context (NOT the
  *           service worker). DOM APIs are available. chrome.* APIs available
@@ -24,9 +24,18 @@ const CONTEST_URL_PREFIX = 'https://leetcode.com/contest/';
 /** chrome.storage.local key used to persist the contest URL. */
 const STORAGE_KEY_CONTEST_URL = 'contestUrl';
 
+/** chrome.storage.local key used to persist the scrape interval (minutes). */
+const STORAGE_KEY_INTERVAL = 'monitoringIntervalMinutes';
+
+/** Matches alarmScheduler.js — Chrome alarms floor at 1 minute (ADR-020). */
+const MIN_PERIOD_MINUTES = 1;
+const MAX_PERIOD_MINUTES = 60;
+const DEFAULT_PERIOD_MINUTES = 5;
+
 // ─── DOM references (resolved after DOMContentLoaded) ────────────────────────
 
 let inputEl;
+let intervalEl;
 let saveBtnEl;
 let statusMsgEl;
 
@@ -82,23 +91,48 @@ function validateContestUrl(rawUrl) {
   }
 }
 
+/**
+ * Validates the scrape interval from the options number input.
+ *
+ * @param {string|number} raw
+ * @returns {{ valid: boolean, error?: string, periodMinutes?: number }}
+ */
+function validateInterval(raw) {
+  const n = Number(raw);
+  if (!Number.isFinite(n) || !Number.isInteger(n)) {
+    return { valid: false, error: 'Interval must be a whole number of minutes.' };
+  }
+  if (n < MIN_PERIOD_MINUTES || n > MAX_PERIOD_MINUTES) {
+    return {
+      valid: false,
+      error: `Interval must be between ${MIN_PERIOD_MINUTES} and ${MAX_PERIOD_MINUTES} minutes.`,
+    };
+  }
+  return { valid: true, periodMinutes: n };
+}
+
 // ─── Core handlers ────────────────────────────────────────────────────────────
 
 /**
- * Loads the previously saved contest URL from storage and populates the input.
- *
- * Called once on page load. If no URL is stored the input is left blank.
+ * Loads the previously saved contest URL and scrape interval from storage.
  *
  * @returns {Promise<void>}
  */
 async function loadSavedUrl() {
   try {
-    const result = await chrome.storage.local.get(STORAGE_KEY_CONTEST_URL);
+    const result = await chrome.storage.local.get([
+      STORAGE_KEY_CONTEST_URL,
+      STORAGE_KEY_INTERVAL,
+    ]);
     if (result[STORAGE_KEY_CONTEST_URL]) {
       inputEl.value = result[STORAGE_KEY_CONTEST_URL];
     }
+    const storedInterval = result[STORAGE_KEY_INTERVAL];
+    intervalEl.value = Number.isFinite(Number(storedInterval))
+      ? String(storedInterval)
+      : String(DEFAULT_PERIOD_MINUTES);
   } catch (err) {
-    console.error('[options] Failed to load saved URL:', err);
+    console.error('[options] Failed to load saved settings:', err);
   }
 }
 
@@ -106,48 +140,74 @@ async function loadSavedUrl() {
  * Handles the Save button click event.
  *
  * Steps:
- *   1. Validate the URL.
- *   2. Persist to chrome.storage.local.
- *   3. Notify the background service worker via chrome.runtime.sendMessage
- *      (type: CONTEST_URL_SAVED). Phase 3 wires the handler.
- *   4. Display success or error feedback.
+ *   1. Validate URL and interval.
+ *   2. Persist both to chrome.storage.local.
+ *   3. Notify the SW: CONTEST_URL_SAVED only when the URL actually changed
+ *      (so a interval-only save does not re-run discovery).
+ *   4. Always notify MONITORING_INTERVAL_SAVED so scrapeCycle is re-registered
+ *      when monitoring is already active.
  *
  * @param {MouseEvent} _event  Click event (unused but required by addEventListener).
  * @returns {Promise<void>}
- * @sideeffects Writes to chrome.storage.local key "contestUrl"; sends a
- *              runtime message to the background service worker.
+ * @sideeffects Writes contestUrl + monitoringIntervalMinutes; sends runtime messages.
  */
 async function handleSave(_event) {
   showStatus('');
 
   const { valid, error, url } = validateContestUrl(inputEl.value);
-
   if (!valid) {
     showStatus(error, 'error');
     return;
   }
 
+  const intervalResult = validateInterval(intervalEl.value);
+  if (!intervalResult.valid) {
+    showStatus(intervalResult.error, 'error');
+    return;
+  }
+  const periodMinutes = intervalResult.periodMinutes;
+
+  let previousUrl = null;
   try {
-    await chrome.storage.local.set({ [STORAGE_KEY_CONTEST_URL]: url });
-    console.log('[options] Contest URL saved:', url);
+    const prev = await chrome.storage.local.get(STORAGE_KEY_CONTEST_URL);
+    previousUrl = prev[STORAGE_KEY_CONTEST_URL] ?? null;
+  } catch (err) {
+    console.warn('[options] Could not read previous URL:', err);
+  }
+
+  try {
+    await chrome.storage.local.set({
+      [STORAGE_KEY_CONTEST_URL]: url,
+      [STORAGE_KEY_INTERVAL]: periodMinutes,
+    });
+    console.log('[options] Settings saved:', { url, periodMinutes });
   } catch (err) {
     console.error('[options] storage.local.set failed:', err);
     showStatus('Failed to save — storage error.', 'error');
     return;
   }
 
-  // Notify the background service worker. The handler is a stub in Phase 2
-  // and will be completed in Phase 3 (tab discovery).
+  const urlChanged = url !== previousUrl;
+  if (urlChanged) {
+    try {
+      const response = await chrome.runtime.sendMessage({
+        type: 'CONTEST_URL_SAVED',
+        contestUrl: url,
+      });
+      console.log('[options] Background acknowledged CONTEST_URL_SAVED:', response);
+    } catch (err) {
+      console.warn('[options] sendMessage CONTEST_URL_SAVED failed (SW may be asleep):', err.message);
+    }
+  }
+
   try {
     const response = await chrome.runtime.sendMessage({
-      type: 'CONTEST_URL_SAVED',
-      contestUrl: url,
+      type: 'MONITORING_INTERVAL_SAVED',
+      periodMinutes,
     });
-    console.log('[options] Background acknowledged CONTEST_URL_SAVED:', response);
+    console.log('[options] Background acknowledged MONITORING_INTERVAL_SAVED:', response);
   } catch (err) {
-    // The service worker may have been suspended. This is non-fatal — the URL
-    // is already persisted; the SW will pick it up on next wake.
-    console.warn('[options] sendMessage to background failed (SW may be asleep):', err.message);
+    console.warn('[options] sendMessage MONITORING_INTERVAL_SAVED failed (SW may be asleep):', err.message);
   }
 
   showStatus('✓ Saved successfully!', 'success');
@@ -182,8 +242,9 @@ async function handleOpenSidePanel(event) {
  * @returns {void}
  */
 function init() {
-  inputEl    = document.getElementById('contestUrlInput');
-  saveBtnEl  = document.getElementById('saveBtn');
+  inputEl     = document.getElementById('contestUrlInput');
+  intervalEl  = document.getElementById('intervalInput');
+  saveBtnEl   = document.getElementById('saveBtn');
   statusMsgEl = document.getElementById('statusMsg');
 
   saveBtnEl.addEventListener('click', handleSave);
