@@ -67,3 +67,39 @@
 - Rationale: Prevents brittle selector breakage when LeetCode modifies utility class names while eliminating transient DOM hydration race conditions. Login walls and page errors are detected early to emit `LOGIN_WALL` or `PAGE_UNAVAILABLE` immediately.
 - Consequences: Content script dispatches stable, unparsed strings to background without float math drift.
 
+## ADR-014: Deep-Copy QuestionStats Before Ingest Mutation
+- Context: `QuestionStats` is a mutable POJO. `ContestStats` stores those same object references in the published snapshot. Mutating in place meant a lock-free reader (`getCurrentStats()`) could observe a torn triple (e.g. percentage set, `acceptedUsers` still null).
+- Decision: `applyIngest` deep-copies every `QuestionStats` into new objects, mutates only the copies, then `AtomicReference.set(newSnapshot)`.
+- Rationale: Section 7A-2 / ADR-003 already serializes writers. Deep-copy is what makes published snapshots actually immutable from the reader's point of view.
+- Consequences: Slightly more allocation per ingest. Readers never share mutable objects with the next writer.
+
+## ADR-015: Alarm Scheduler Landed in Phase 6 (Master Plan Phase 7)
+- Context: The master plan listed `alarmScheduler.js` as Phase 7. Phase 6 needs all 4 tabs in a scrape cycle and an immediate first cycle after discovery.
+- Decision: Implement `registerMonitoringAlarm` + `runScrapeCycle` in Phase 6. Phase 7 remains for later alarm polish (interval config, ENDED stop) — not for the core loop.
+- Rationale: Architect approved immediate first cycle **and** 5-minute alarm registration after the 4 tabs are persisted. Splitting that across phases would leave monitoring inert after discovery.
+- Consequences: Phase 6 owns the scrape loop. `chrome.alarms` `delayInMinutes: 0` plus an explicit `runScrapeCycle()` call; `cycleInProgress` prevents a double start.
+
+## ADR-016: postIngest Always Uses Qn in the URL
+- Context: `backendClient.postIngest` JSDoc said 1–4; the backend path is `/api/contest/ingest/Q1`–`Q4`. Passing `1` produced `/ingest/1` (400). Passing `"Q1"` through a `Q${questionNumber}` interpolator would produce `QQ1`.
+- Decision: `normalizeQuestionSlot` accepts `1`, `"1"`, `"q1"`, `"Q1"` and always builds `/api/contest/ingest/Qn`.
+- Rationale: Callers (alarm timeout, SCRAPE_RESULT handler) should not need to remember the path format.
+- Consequences: Invalid slots still go on the wire and the backend returns 400.
+
+## ADR-017: Immediate First Cycle After Discovery
+- Context: After Q1–Q4 tabs open, waiting up to 5 minutes for the first scrape leaves the dashboard empty.
+- Decision (Architect): After discovery persists tab IDs, call `runScrapeCycle()` once immediately **and** `registerMonitoringAlarm()`.
+- Rationale: Tabs already auto-scrape on first load, but the cycle reload is the guaranteed path that registers pending-scrape waits and timeout ingest.
+- Consequences: Discovery `sendResponse` fires before the cycle so the message channel does not sit open for up to 80s.
+
+## ADR-018: 20s Scrape Timeout Posts NAVIGATION_TIMEOUT
+- Context: A hung problem tab must not stall the sequential Q1→Q4 loop, and must not be dropped silently (empty slot looks like "never scraped").
+- Decision (Architect): `waitForScrapeResult` times out at 20s and POSTs `{ scrapingStatus: "NAVIGATION_TIMEOUT", rawUsersAccepted: null, errorMessage }`. Only `handleScrapeResult` POSTs real scrapes.
+- Rationale: Backend already has `NAVIGATION_TIMEOUT`. A synthetic ingest keeps lifecycle MONITORING and lastUpdated moving.
+- Consequences: The waiter uses `setTimeout` for a 20s deadline (chrome.alarms cannot do sub-minute delays). The in-flight reload/message/fetch work keeps the SW alive for that window. Duplicate `SCRAPE_RESULT` after resolve is ignored.
+
+## ADR-019: Zero totalUsers Is PARSE_ERROR
+- Context: `"10 / 0"` parses, but `accepted / 0 × 100` is undefined. Storing `0%` would rank the question as hardest and could fire false overtakes later.
+- Decision (Architect): `AcceptanceCalculationService` throws `IllegalArgumentException` when `totalUsers == 0`. `applyIngest` catches it (with `ParseException`) and marks `PARSE_ERROR`, nulling metric fields.
+- Rationale: Same failure class as a malformed string — we do not have a usable percentage.
+- Consequences: Ingest HTTP status stays 200; the slot status is `PARSE_ERROR`.
+

@@ -18,14 +18,17 @@ Two processes communicate over HTTP on localhost:8080.
 5. `background.js` calls `backendClient.postConfig({ contestUrl, questions: [...] })`
 6. Backend: `ContestConfigController` receives POST, calls `ContestStateService.initializeContest()`
 7. Backend: initializes empty `ContestStats` for Q1–Q4
-8. `tabLifecycleManager` opens 4 background tabs (Q1–Q4)
-9. `alarmScheduler` registers `chrome.alarms` with 5-minute period
+8. `tabLifecycleManager` opens 4 background tabs (Q1–Q4); IDs persisted
+9. `background.js` `sendResponse`s discovery success, then:
+   - `registerMonitoringAlarm()` — `chrome.alarms` `scrapeCycle`, period 5 min, delay 0
+   - `runScrapeCycle()` immediately (does not wait for the first alarm tick)
 
 ## One Full Monitoring Cycle (Both Processes)
 
 ```mermaid
 sequenceDiagram
     participant Alarm as chrome.alarms
+    participant AS as alarmScheduler.js
     participant BG as background.js
     participant TLM as tabLifecycleManager.js
     participant CS as problemPageScript.js
@@ -35,25 +38,34 @@ sequenceDiagram
     participant REF as AtomicReference<ContestStats>
     participant SP as sidepanel.js
 
-    Alarm->>BG: onAlarm fires
-    BG->>TLM: getCycleInProgress()
-    TLM-->>BG: false
-    BG->>TLM: setCycleInProgress(true)
-    loop Q1 to Q4
-        BG->>TLM: reloadTab(tabId)
+    Alarm->>BG: onAlarm scrapeCycle (or discovery calls runScrapeCycle)
+    BG->>AS: runScrapeCycle()
+    AS->>TLM: getCycleInProgress()
+    TLM-->>AS: false
+    AS->>TLM: setCycleInProgress(true)
+    loop Q1 to Q4 sequential
+        AS->>AS: registerPendingScrape(tabId, Qn)
+        AS->>TLM: reloadTab(tabId)
         TLM->>CS: chrome.tabs.reload() -> onUpdated 'complete'
-        CS->>CS: MutationObserver waits for "Users Accepted"
-        CS->>CS: double-read stability check
-        CS-->>BG: { rawUsersAccepted, scrapingStatus, selectorStrategyUsed }
-        BG->>BC: postIngest(questionNumber, payload)
-        BC->>API: POST /api/contest/ingest/Q1
-        API->>SVC: applyIngest(Q1, payload) [enters critical section]
-        SVC->>SVC: parse -> calculate -> rank -> compare
-        SVC->>REF: AtomicReference.set(newSnapshot)
-        SVC-->>API: QuestionStats for Q1
-        API-->>BC: 200 OK + QuestionStats JSON
+        CS->>CS: MutationObserver + double-read
+        alt SCRAPE_RESULT within 20s
+            CS-->>BG: { rawUsersAccepted, scrapingStatus, ... }
+            BG->>BC: postIngest(Qn, payload)
+            BC->>API: POST /api/contest/ingest/Qn
+            API->>SVC: applyIngest (synchronized)
+            SVC->>SVC: deep-copy QuestionStats
+            SVC->>SVC: parse + calculatePercentage
+            SVC->>SVC: ranking = previous (TODO Phase 8)
+            SVC->>SVC: overtakes = previous (TODO Phase 9)
+            SVC->>REF: AtomicReference.set(newSnapshot)
+            SVC-->>API: QuestionStats
+            API-->>BC: 200 + acceptedUsers, totalUsers, usersAcceptedPercentage
+            BG->>AS: resolvePendingScrape(tabId)
+        else 20s timeout
+            AS->>BC: postIngest(Qn, NAVIGATION_TIMEOUT)
+        end
     end
-    BG->>TLM: setCycleInProgress(false)
+    AS->>TLM: setCycleInProgress(false)
     SP->>API: GET /api/contest/status (every 5s)
     API->>REF: AtomicReference.get()
     REF-->>API: ContestStats snapshot
