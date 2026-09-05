@@ -114,4 +114,3 @@
 - Decision: Export `stopMonitoringAlarm()` and `handleContestEnded()`. Wire a `CONTEST_ENDED` runtime message. Persist `monitoringStopped: true` so a service-worker restart does not recreate `scrapeCycle`. Do **not** invent ENDED detection in Phase 7.
 - Rationale: Inventing a 3-cycle detector in the extension would duplicate Phase 11 and could false-stop on a static mid-contest snapshot.
 - Consequences: Until Phase 11 calls `handleContestEnded()` (or sends `CONTEST_ENDED`), the alarm keeps running after a real contest ends. Phase 11 must invoke the hook when health/status reports ENDED.
-

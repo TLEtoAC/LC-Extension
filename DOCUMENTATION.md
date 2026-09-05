@@ -125,9 +125,9 @@ Returns the latest ContestStats snapshot.
 ### Extension
 | File | Purpose |
 |---|---|
-| `background/background.js` | Service worker — discovery, ingest, interval re-register, `CONTEST_ENDED` hook, SW alarm restore |
+| `background/background.js` | Service worker — discovery, `handleScrapeResult` → `postIngest`, interval re-register, `CONTEST_ENDED` hook, SW alarm restore |
 | `background/tabLifecycleManager.js` | 4-tab persistence, reload cycle, recovery |
-| `background/alarmScheduler.js` | Configurable `scrapeCycle` (default 5 min, clamp 1–60); `runScrapeCycle` Q1→Q4; `stopMonitoringAlarm` / `handleContestEnded` Phase 11 hook; 20s `NAVIGATION_TIMEOUT` |
+| `background/alarmScheduler.js` | Configurable `scrapeCycle` (default 5 min, clamp 1–60); `runScrapeCycle` Q1→Q4; pending-scrape map; `stopMonitoringAlarm` / `handleContestEnded` Phase 11 hook; 20s `NAVIGATION_TIMEOUT` |
 | `background/backendClient.js` | HTTP client; `postIngest` normalizes slot to `Qn` |
 | `content-scripts/contestPageScript.js` | Contest homepage discovery |
 | `content-scripts/problemPageScript.js` | Problem page scraping |

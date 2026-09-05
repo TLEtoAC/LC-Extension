@@ -79,7 +79,7 @@ Follow a single value from cycle start to snapshot:
 | Requests reach the backend but are rejected | CORS: is the extension ID in `CorsConfig.java` `EXTENSION_ORIGIN` correct? | Is the `"key"` field in `manifest.json` set? | Did you reload the extension after changing the key? |
 | Scraping returns `SELECTOR_NOT_FOUND` | Has LeetCode changed their DOM? | Check `problemPageScript.js` selector fallback chain | Try the aria-label fallback manually in DevTools |
 | `LOGIN_WALL` status | User is not logged into LeetCode in Chrome | Check if LeetCode session cookie is present | Log in to LeetCode and reload the problem tab |
-| Cycling never starts | Is `cycleInProgress` stuck at `true` in storage? | SW start should `recoverOrphanedCycleGuard()` — check that ran | Check `alarmScheduler.js` / `ensureMonitoringAlarm` |
+| Cycling never starts | Is `cycleInProgress` stuck at `true` in storage? | SW start should `recoverOrphanedCycleGuard()` — check that ran; otherwise clear storage and reload | Check `alarmScheduler.js` / `ensureMonitoringAlarm` |
 | Interval change does nothing | Did Save persist `monitoringIntervalMinutes`? | SW log for `MONITORING_INTERVAL_SAVED` | Alarm only re-registers after Q1–Q4 tabs exist |
 | Alarm keeps firing after contest ends | Phase 11 has not called `handleContestEnded` yet | ENDED is not computed until `ContestLifecycleService` | Do not invent detection in the extension |
 | Alarm returns after ENDED + reload | Is `monitoringStopped` still true? | `ensureMonitoringAlarm` must no-op when stopped | Check `stopMonitoringAlarm` wrote storage |
