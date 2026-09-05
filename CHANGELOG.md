@@ -2,6 +2,23 @@
 
 ## [Unreleased]
 
+## Phase 6 — Four Questions + Concurrency (2026-09-05)
+**Lead:** Extension/Background Agent + Backend/Core Agent | **Reviewer:** Edge-Case Red Team
+**Side:** extension/ + backend/
+- [x] AcceptanceCalculationService.java — BigDecimal percentage, scale 10 HALF_UP; zero total throws
+- [x] ContestStateService.applyIngest — synchronized critical section, deep-copy QuestionStats, parse + calculate, PARSE_ERROR on failure
+- [x] ContestStateServiceConcurrencyTest — 4 simultaneous ingests, last-write-wins, isolated parse failure, concurrent readers
+- [x] alarmScheduler.js — registerMonitoringAlarm, runScrapeCycle Q1→Q4, pending-scrape map, NAVIGATION_TIMEOUT on 20s wait
+- [x] background.js — handleScrapeResult → postIngest; immediate cycle after discovery; scrapeCycle alarm
+- [x] backendClient.postIngest — normalize 1 / "1" / "Q1" → URL slot Qn
+
+## Phase 5 — Parser Hardening (2026-09-03)
+**Lead:** Parser/Data Agent + Testing/QA Agent | **Reviewer:** Architect
+**Side:** backend/
+- [x] AcceptanceStatsParser.java — K/M/B suffixes, comma stripping, zero `double` math
+- [x] ParsedAcceptance.java / ParseException.java
+- [x] AcceptanceStatsParserTest.java — 40 tests including float-drift regressions
+
 ## Phase 1 — Backend Skeleton (2026-08-16)
 **Lead:** REST API Agent | **Reviewer:** Architect
 **Side:** backend/
