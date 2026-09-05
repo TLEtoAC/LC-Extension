@@ -1,13 +1,16 @@
 /*
  * File: ContestStateService.java
- * Author: REST API Agent
- * Phase: Phase 4 — Backend: ContestIngestController & Ingest DTOs
- * Purpose: Central thread-safe state management service for active contest tracking and snapshot publishing.
+ * Author: Backend/Core Agent
+ * Phase: Phase 6 — Four Questions + Concurrency
+ * Purpose: Central thread-safe state management. applyIngest wraps parse → calculate →
+ *          ranking stub → overtake stub → snapshot publish in a single synchronized critical section.
  *
  * Concurrency & Architecture Notes:
- * This class owns the ContestStateService critical section per Section 7A-2.
- * All state mutations to contest metrics and lifecycle transitions are synchronized through this service.
- * Snapshots are published atomically via AtomicReference<ContestStats> to allow non-blocking reads.
+ * This class owns the ContestStateService critical section per Section 7A-2 / ADR-003.
+ * All state mutations are synchronized. QuestionStats are deep-copied before mutation so
+ * published snapshots cannot be torn by a later ingest (ADR-014).
+ * Snapshots are published atomically via AtomicReference<ContestStats> for lock-free reads.
+ * No I/O is performed inside the lock.
  */
 
 package com.leetcode.monitor.service;
@@ -16,6 +19,10 @@ import com.leetcode.monitor.dto.ContestIngestRequest;
 import com.leetcode.monitor.model.ContestStats;
 import com.leetcode.monitor.model.Question;
 import com.leetcode.monitor.model.QuestionStats;
+import com.leetcode.monitor.model.RankingChange;
+import com.leetcode.monitor.model.ScrapingStatus;
+import com.leetcode.monitor.parser.AcceptanceStatsParser;
+import com.leetcode.monitor.parser.ParsedAcceptance;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -25,6 +32,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
@@ -39,6 +47,21 @@ public class ContestStateService {
     private static final Logger logger = LoggerFactory.getLogger(ContestStateService.class);
 
     private final AtomicReference<ContestStats> currentStats = new AtomicReference<>();
+    private final AcceptanceStatsParser acceptanceStatsParser;
+    private final AcceptanceCalculationService acceptanceCalculationService;
+
+    /**
+     * Constructs the service with parser and percentage calculator.
+     *
+     * @param acceptanceStatsParser         parser for raw acceptance strings
+     * @param acceptanceCalculationService  BigDecimal percentage calculator
+     */
+    public ContestStateService(
+            AcceptanceStatsParser acceptanceStatsParser,
+            AcceptanceCalculationService acceptanceCalculationService) {
+        this.acceptanceStatsParser = acceptanceStatsParser;
+        this.acceptanceCalculationService = acceptanceCalculationService;
+    }
 
     /**
      * Initializes the contest state with the configured contest URL and questions.
@@ -80,12 +103,13 @@ public class ContestStateService {
     /**
      * Updates question statistics with inbound scraped data and publishes an updated contest snapshot.
      *
-     * Critical section: This method touches the critical section and is synchronized to guarantee that
-     * metric updates, ranking recalculations, and snapshot publishing are mutually exclusive and atomic.
+     * <p>Critical section: method-level {@code synchronized} wraps the full compound transition
+     * (deep-copy → apply ingest → parse/calculate → ranking stub → overtake stub → publish).
+     * AtomicReference alone is not sufficient (ADR-003).</p>
      *
      * @param questionNumber the question slot identifier (e.g., "Q1", "Q2", "Q3", "Q4")
      * @param request        the ingest payload containing scraping status and scraped statistics
-     * @return the updated {@link QuestionStats} for the target question
+     * @return the updated {@link QuestionStats} for the target question (a copy, not the previous snapshot's object)
      * @throws IllegalStateException    if no contest has been initialized
      * @throws IllegalArgumentException if questionNumber does not match any configured question
      * @throws NullPointerException     if questionNumber or request is null
@@ -94,8 +118,8 @@ public class ContestStateService {
         Objects.requireNonNull(questionNumber, "questionNumber cannot be null");
         Objects.requireNonNull(request, "request cannot be null");
 
-        ContestStats current = currentStats.get();
-        if (current == null) {
+        ContestStats previous = currentStats.get();
+        if (previous == null) {
             logger.error("Cannot apply ingest for {}: contest has not been initialized", questionNumber);
             throw new IllegalStateException("Contest has not been initialized");
         }
@@ -105,16 +129,13 @@ public class ContestStateService {
         List<QuestionStats> updatedQuestions = new ArrayList<>();
         QuestionStats targetQuestionStats = null;
 
-        for (QuestionStats qs : current.getQuestions()) {
-            if (qs.getQuestionNumber().equalsIgnoreCase(questionNumber.trim())) {
-                qs.setTimestamp(Instant.now());
-                qs.setScrapingStatus(request.getScrapingStatus());
-                qs.setErrorMessage(request.getErrorMessage());
-                qs.setSelectorStrategyUsed(request.getSelectorStrategyUsed());
-                // In Phase 4, scraping metadata is stored; mathematical parsing and calculations are wired in Phase 5
-                targetQuestionStats = qs;
+        for (QuestionStats qs : previous.getQuestions()) {
+            QuestionStats copy = copyQuestionStats(qs);
+            if (copy.getQuestionNumber().equalsIgnoreCase(questionNumber.trim())) {
+                applyIngestToCopy(copy, request);
+                targetQuestionStats = copy;
             }
-            updatedQuestions.add(qs);
+            updatedQuestions.add(copy);
         }
 
         if (targetQuestionStats == null) {
@@ -122,22 +143,88 @@ public class ContestStateService {
             throw new IllegalArgumentException("Question " + questionNumber + " not found in contest configuration");
         }
 
-        String nextLifecycleState = "INITIALISED".equals(current.getLifecycleState()) ? "MONITORING" : current.getLifecycleState();
+        String nextLifecycleState = "INITIALISED".equals(previous.getLifecycleState()) ? "MONITORING" : previous.getLifecycleState();
 
-        ContestStats updatedSnapshot = ContestStats.builder()
-                .contestUrl(current.getContestUrl())
+        // TODO(Phase 8): recompute ranking from usersAcceptedPercentage descending
+        List<String> ranking = previous.getRanking();
+
+        // TODO(Phase 9): compute overtakes / pairwiseRelationships from previous vs new snapshot
+        List<RankingChange> recentChanges = previous.getRecentChanges();
+        Map<String, String> pairwiseRelationships = previous.getPairwiseRelationships();
+
+        ContestStats newSnapshot = ContestStats.builder()
+                .contestUrl(previous.getContestUrl())
                 .questions(updatedQuestions)
-                .ranking(current.getRanking())
-                .recentChanges(current.getRecentChanges())
+                .ranking(ranking)
+                .recentChanges(recentChanges)
                 .lastUpdated(Instant.now())
                 .lifecycleState(nextLifecycleState)
-                .pairwiseRelationships(current.getPairwiseRelationships())
+                .pairwiseRelationships(pairwiseRelationships)
                 .build();
 
-        currentStats.set(updatedSnapshot);
+        currentStats.set(newSnapshot);
         logger.info("Successfully applied ingest for {}. Snapshot updated with lifecycleState={}", questionNumber, nextLifecycleState);
 
         return targetQuestionStats;
+    }
+
+    /**
+     * Applies scrape metadata and, on SUCCESS, parse + percentage calculation to a deep-copied QuestionStats.
+     * Parse/zero-total failures become PARSE_ERROR with metrics cleared. Non-SUCCESS statuses from the
+     * extension (including NAVIGATION_TIMEOUT) preserve that status and clear metric fields.
+     *
+     * @param target  mutable copy of the target question
+     * @param request inbound ingest payload
+     */
+    private void applyIngestToCopy(QuestionStats target, ContestIngestRequest request) {
+        target.setTimestamp(Instant.now());
+        target.setScrapingStatus(request.getScrapingStatus());
+        target.setErrorMessage(request.getErrorMessage());
+        target.setSelectorStrategyUsed(request.getSelectorStrategyUsed());
+
+        if (request.getScrapingStatus() == ScrapingStatus.SUCCESS) {
+            try {
+                ParsedAcceptance parsed = acceptanceStatsParser.parse(request.getRawUsersAccepted());
+                target.setAcceptedUsers(parsed.acceptedUsers());
+                target.setTotalUsers(parsed.totalUsers());
+                target.setUsersAcceptedPercentage(
+                        acceptanceCalculationService.calculatePercentage(parsed.acceptedUsers(), parsed.totalUsers())
+                );
+            } catch (IllegalArgumentException ex) {
+                // ParseException extends IllegalArgumentException; zero totalUsers also throws IAE
+                logger.warn("Parse/calculate failed for {}: {}", target.getQuestionNumber(), ex.getMessage());
+                target.setScrapingStatus(ScrapingStatus.PARSE_ERROR);
+                target.setErrorMessage(ex.getMessage());
+                target.setAcceptedUsers(null);
+                target.setTotalUsers(null);
+                target.setUsersAcceptedPercentage(null);
+            }
+        } else {
+            target.setAcceptedUsers(null);
+            target.setTotalUsers(null);
+            target.setUsersAcceptedPercentage(null);
+        }
+    }
+
+    /**
+     * Deep-copies a {@link QuestionStats} so published snapshots are not mutated in place.
+     *
+     * @param source the snapshot-owned instance
+     * @return a new object with the same field values
+     */
+    private QuestionStats copyQuestionStats(QuestionStats source) {
+        return new QuestionStats(
+                source.getQuestionNumber(),
+                source.getProblemName(),
+                source.getProblemUrl(),
+                source.getAcceptedUsers(),
+                source.getTotalUsers(),
+                source.getUsersAcceptedPercentage(),
+                source.getTimestamp(),
+                source.getScrapingStatus(),
+                source.getErrorMessage(),
+                source.getSelectorStrategyUsed()
+        );
     }
 
     /**
