@@ -2,8 +2,9 @@
   "name": "lc-monitor-extension",
   "version": "1.0.0",
   "description": "LeetCode Contest Monitor — Chrome MV3 Extension",
+  "type": "module",
   "scripts": {
-    "test": "jest"
+    "test": "NODE_OPTIONS=--experimental-vm-modules jest"
   },
   "devDependencies": {
     "jest": "^29.0.0",
@@ -11,6 +12,7 @@
   },
   "jest": {
     "testEnvironment": "node",
-    "transform": {}
+    "transform": {},
+    "testMatch": ["**/tests/**/*.test.js"]
   }
 }

@@ -2,6 +2,38 @@
 
 ## [Unreleased]
 
+## Phase 11 — Robustness + Lifecycle (2026-09-05)
+**Lead:** Backend/Core + Extension/Background + Edge-Case Red Team | **Reviewer:** Architect
+**Side:** backend/ + extension/
+- [x] ContestLifecycleService — 3 identical Q1–Q4 percentage rounds → `lifecycleState=ENDED` (ADR-006)
+- [x] ENDED stop path: `observeEndedAndStop` / side-panel poll / startup health → existing `handleContestEnded` (ADR-021 / ADR-026)
+- [x] `recoverMissingTabs` reopens closed Q1–Q4 tabs from `discoveredQuestions`
+- [x] JUnit lifecycle tests; Jest tabLifecycle / backendClient / ENDED hook (8)
+
+## Phase 10 — Status/Health API + Side Panel UI (2026-09-05)
+**Lead:** REST API + UI Agents | **Reviewer:** Architect
+**Side:** backend/ + extension/
+- [x] ContestStatusController — GET /api/contest/status (lock-free); uninitialized empty envelope
+- [x] ContestHealthController — lifecycleState, discoveryStatus, lastIngestReceivedAt, questionStatuses
+- [x] sidepanel.html/js/css — 5s poll, ranking, overtakes, backend-unreachable + empty + ENDED banners
+- [x] popup.html/js — lightweight ranking + OPEN_SIDE_PANEL
+- [x] background OPEN_SIDE_PANEL; manifest host_permissions for localhost:8080
+- [x] Status/health JUnit; `node --check` on all extension JS
+
+## Phase 9 — Overtaking Detection (2026-09-05)
+**Lead:** Backend/Core Agent | **Reviewer:** Testing/QA
+**Side:** backend/
+- [x] ComparisonService.java — pairwise Qx <= Qy → Qx > Qy (ties included); pairwise map dedup; null % keeps prior relation
+- [x] ContestStateService.applyIngest — overtakes inside the same synchronized publish
+- [x] ComparisonServiceTest + ContestStateServiceOvertakeTest; concurrency suite still green
+
+## Phase 8 — State + Ranking (2026-09-05)
+**Lead:** Backend/Core Agent | **Reviewer:** Edge-Case Red Team
+**Side:** backend/
+- [x] RankingService.java — descending `usersAcceptedPercentage`, ties by question number, null % last (ADR-022)
+- [x] ContestStateService.applyIngest — ranking computed inside the same synchronized publish
+- [x] RankingServiceTest + ContestStateServiceRankingTest; concurrency test asserts ranking on the snapshot
+
 ## Phase 7 — Alarm Scheduler Polish (2026-09-05)
 **Lead:** Extension/Background Agent | **Reviewer:** Architect
 **Side:** extension/

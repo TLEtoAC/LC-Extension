@@ -28,9 +28,10 @@ import {
   getPersistedTabIds,
   getCycleInProgress,
   setCycleInProgress,
-  reloadTab
+  reloadTab,
+  recoverMissingTabs
 } from './tabLifecycleManager.js';
-import { postIngest } from './backendClient.js';
+import { postIngest, getStatus, checkHealth } from './backendClient.js';
 
 export const ALARM_NAME = 'scrapeCycle';
 export const QUESTION_SLOTS = ['Q1', 'Q2', 'Q3', 'Q4'];
@@ -194,6 +195,53 @@ export async function handleContestEnded(source = 'phase11') {
 }
 
 /**
+ * Observes backend lifecycleState and invokes the Phase 7 ENDED hook.
+ * Single stop path: handleContestEnded → stopMonitoringAlarm.
+ *
+ * @param {string} [source]
+ * @returns {Promise<boolean>} true if ENDED was observed and the hook ran
+ */
+export async function observeEndedAndStop(source = 'status-poll') {
+  if (await isMonitoringStopped()) {
+    return true;
+  }
+  let snapshot = null;
+  try {
+    snapshot = await getStatus();
+  } catch (err) {
+    console.warn('[alarmScheduler] getStatus for ENDED check failed:', err);
+  }
+  if (!snapshot || snapshot.lifecycleState !== 'ENDED') {
+    return false;
+  }
+  await handleContestEnded(source);
+  return true;
+}
+
+/**
+ * Startup path: health payload also carries lifecycleState (Phase 10).
+ *
+ * @returns {Promise<boolean>}
+ */
+export async function observeEndedFromHealth() {
+  if (await isMonitoringStopped()) {
+    return true;
+  }
+  let health = null;
+  try {
+    health = await checkHealth();
+  } catch (err) {
+    console.warn('[alarmScheduler] checkHealth for ENDED check failed:', err);
+    return false;
+  }
+  if (!health || health.lifecycleState !== 'ENDED') {
+    return false;
+  }
+  await handleContestEnded('health-startup');
+  return true;
+}
+
+/**
  * After a service-worker restart: restore scrapeCycle if monitoring is active
  * and the alarm was lost (unpacked reload clears alarms). Does not start a
  * cycle. Honors monitoringStopped so ENDED stays stopped.
@@ -258,6 +306,15 @@ export async function runScrapeCycle() {
   console.log('[alarmScheduler] Scrape cycle started (Q1→Q4).');
 
   try {
+    try {
+      const recovery = await recoverMissingTabs();
+      if (recovery.recovered.length > 0) {
+        console.log('[alarmScheduler] Recovered missing tabs:', recovery.recovered.join(','));
+      }
+    } catch (recoverErr) {
+      console.warn('[alarmScheduler] recoverMissingTabs failed:', recoverErr);
+    }
+
     const tabIds = await getPersistedTabIds();
 
     for (const questionNumber of QUESTION_SLOTS) {
@@ -284,6 +341,11 @@ export async function runScrapeCycle() {
   } finally {
     await setCycleInProgress(false);
     console.log('[alarmScheduler] Scrape cycle finished — cycleInProgress cleared.');
+    try {
+      await observeEndedAndStop('post-cycle-status');
+    } catch (endedErr) {
+      console.warn('[alarmScheduler] ENDED observe after cycle failed:', endedErr);
+    }
   }
 }
 

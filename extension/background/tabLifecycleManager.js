@@ -9,7 +9,7 @@
  *           event firings, wiping all in-memory state.
  *
  * Author  : Extension/Background Agent
- * Phase   : 2 (scaffold); recoverMissingTabs is a stub until Phase 11.
+ * Phase   : 11 (TAB_MISSING recovery)
  *
  * Context : Runs exclusively in the Chrome Extension Service Worker context.
  *
@@ -179,24 +179,50 @@ export function reloadTab(tabId) {
 // ─── Phase 11 stub ───────────────────────────────────────────────────────────
 
 /**
- * Recovers any tabs that are missing from the persisted tabIds map.
+ * Reopens Q1–Q4 background tabs that are null or no longer exist.
  *
- * STUB — full implementation deferred to Phase 11 (TAB_MISSING recovery).
+ * Uses discoveredQuestions[].problemUrl (not contestUrl) so recovery does
+ * not hard-code problem paths. Persists the updated tab ID map.
  *
- * When implemented this function will:
- *   1. Read getPersistedTabIds().
- *   2. For each key (Q1–Q4) whose value is null or whose tab no longer
- *      exists, call openOrReuseTab() with the correct problem URL.
- *   3. Update the persisted tab ID map via setPersistedTabIds().
- *
- * @param {string} contestUrl  Base contest URL, e.g.
- *                             "https://leetcode.com/contest/weekly-contest-123/"
- * @returns {Promise<void>}
+ * @param {string} [contestUrl] unused — kept for the Phase 2 signature
+ * @returns {Promise<{ recovered: string[], tabIds: object }>}
+ * @sideeffects May create tabs; writes tabIds
  * @note Runs in the extension service worker context.
  */
 export async function recoverMissingTabs(contestUrl) {
-  console.warn(
-    '[tabLifecycle] recoverMissingTabs() called — Phase 11 stub only. ' +
-    `contestUrl="${contestUrl}" — no recovery action taken yet.`
-  );
+  const tabIds = await getPersistedTabIds();
+  const { discoveredQuestions } = await chrome.storage.local.get('discoveredQuestions');
+  const questions = Array.isArray(discoveredQuestions) ? discoveredQuestions : [];
+  const next = { Q1: tabIds.Q1 ?? null, Q2: tabIds.Q2 ?? null, Q3: tabIds.Q3 ?? null, Q4: tabIds.Q4 ?? null };
+  const recovered = [];
+
+  for (const slot of ['Q1', 'Q2', 'Q3', 'Q4']) {
+    const url = questions.find((q) => String(q?.questionNumber).toUpperCase() === slot)?.problemUrl;
+    if (!url) {
+      continue;
+    }
+
+    let alive = false;
+    if (next[slot] != null) {
+      try {
+        await chrome.tabs.get(next[slot]);
+        alive = true;
+      } catch {
+        alive = false;
+      }
+    }
+
+    if (!alive) {
+      console.warn(
+        `[tabLifecycle] recoverMissingTabs: ${slot} missing (tabId=${next[slot]}) — reopening. contestUrl=${contestUrl ?? ''}`
+      );
+      next[slot] = await openOrReuseTab(null, url);
+      recovered.push(slot);
+    }
+  }
+
+  if (recovered.length > 0) {
+    await setPersistedTabIds(next);
+  }
+  return { recovered, tabIds: next };
 }

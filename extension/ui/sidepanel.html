@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>LeetCode Contest Monitor</title>
+  <link rel="stylesheet" href="sidepanel.css" />
+</head>
+<body>
+  <header>
+    <h1>Contest Acceptance</h1>
+    <p id="contestUrlLabel">Waiting for contest configuration…</p>
+  </header>
+
+  <div id="backendBanner" class="banner error" role="status">
+    Backend not running. Start the local server on localhost:8080, then this panel will refresh.
+  </div>
+  <div id="emptyBanner" class="banner info" role="status">
+    No contest configured yet. Open Options, save a LeetCode contest URL, and wait for discovery.
+  </div>
+  <div id="endedBanner" class="banner info" role="status">
+    Contest marked ENDED. Monitoring alarm has been stopped.
+  </div>
+
+  <section class="card">
+    <h2>Status</h2>
+    <div class="meta">
+      <span id="lifecycleLabel">lifecycle: —</span>
+      <span id="updatedLabel">updated: —</span>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Questions</h2>
+    <div id="questionsRoot" class="empty">No question data yet.</div>
+  </section>
+
+  <section class="card">
+    <h2>Ranking</h2>
+    <ol id="rankingRoot" class="rank-list empty">
+      <li>Ranking appears after the first successful ingest.</li>
+    </ol>
+  </section>
+
+  <section class="card">
+    <h2>Recent overtakes</h2>
+    <ul id="changesRoot" class="change-list empty">
+      <li>No overtakes yet.</li>
+    </ul>
+  </section>
+
+  <footer>Polls GET /api/contest/status every 5s</footer>
+  <script type="module" src="sidepanel.js"></script>
+</body>
+</html>

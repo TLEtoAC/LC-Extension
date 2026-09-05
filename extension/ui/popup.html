@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Contest Monitor</title>
+  <link rel="stylesheet" href="sidepanel.css" />
+  <style>
+    body { width: 320px; min-height: 220px; padding: 14px; }
+    .actions { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+    .link-btn {
+      display: block;
+      padding: 8px 12px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      color: var(--accent);
+      text-decoration: none;
+      text-align: center;
+      font-weight: 600;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Contest Monitor</h1>
+    <p id="summaryLabel">Checking backend…</p>
+  </header>
+  <div id="backendBanner" class="banner error" role="status">
+    Backend not running. Start Spring Boot on localhost:8080.
+  </div>
+  <div id="emptyBanner" class="banner info" role="status">
+    No contest configured. Open Options to add a contest URL.
+  </div>
+  <section class="card">
+    <h2>Ranking</h2>
+    <ol id="rankingRoot" class="rank-list empty"><li>—</li></ol>
+  </section>
+  <div class="actions">
+    <a class="link-btn" id="openSidePanel" href="#" role="button">Open dashboard</a>
+    <a class="link-btn" href="options.html" target="_blank" rel="noopener">Options</a>
+  </div>
+  <script type="module" src="popup.js"></script>
+</body>
+</html>

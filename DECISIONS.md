@@ -114,3 +114,33 @@
 - Decision: Export `stopMonitoringAlarm()` and `handleContestEnded()`. Wire a `CONTEST_ENDED` runtime message. Persist `monitoringStopped: true` so a service-worker restart does not recreate `scrapeCycle`. Do **not** invent ENDED detection in Phase 7.
 - Rationale: Inventing a 3-cycle detector in the extension would duplicate Phase 11 and could false-stop on a static mid-contest snapshot.
 - Consequences: Until Phase 11 calls `handleContestEnded()` (or sends `CONTEST_ENDED`), the alarm keeps running after a real contest ends. Phase 11 must invoke the hook when health/status reports ENDED.
+
+## ADR-022: Ranking Is Descending Acceptance Percentage
+- Context: The Architect prompt suggested ascending % (hardest = rank 1). The master plan is silent on sort order. Phase 3 `ContestStats` and PROGRESS already documented descending.
+- Decision: `ranking[]` is question numbers sorted by `usersAcceptedPercentage` **descending** (highest acceptance first). Ties break by question number ascending (`Q1` before `Q2`). Null percentages (PARSE_ERROR, NAVIGATION_TIMEOUT, not yet scraped) sort last and never throw.
+- Rationale: Matches the existing snapshot contract and the overtake language ("Q4 overtook Q3" = Q4's % moved above Q3's). `BigDecimal.compareTo` only.
+- Consequences: The dashboard "rank 1" is the easiest (highest %) question, not the hardest.
+
+## ADR-023: Pairwise Overtake Is Percentage Transition, Not Rank Hop
+- Context: Section 18 says only report Qx <= Qy → Qx > Qy, ties included. Ranking order (ADR-022) is a display sort.
+- Decision: `ComparisonService` compares `usersAcceptedPercentage` pairwise. Canonical key `QavsQb` (a < b) stores how Qa compares to Qb (`GT`/`LT`/`EQ`). An event fires only when a stored relation flips across that inequality (EQ counts as <=). First observation stores the relation and emits nothing. Null percentage skips that pair and keeps the previous relation.
+- Rationale: Dedup lives on the snapshot's `pairwiseRelationships`. PARSE_ERROR on one slot must not wipe or re-emit other pairs.
+- Consequences: Becoming tied (GT/LT → EQ) is not an overtake. History is newest-first, capped at 20.
+
+## ADR-024: Extension host_permissions Include Local Backend
+- Context: Side panel and popup `fetch` localhost:8080. Manifest previously allowed only `https://leetcode.com/*`.
+- Decision: Add `http://127.0.0.1:8080/*` and `http://localhost:8080/*` only. Do not add `*` or LAN hosts.
+- Rationale: MV3 needs host permission for extension-page fetch. CORS stays pinned to the extension origin (ADR-005).
+- Consequences: User still must start the backend; unreachable remains a first-class UI state (ADR-009).
+
+## ADR-025: Uninitialized Status Is 200 Empty Envelope
+- Context: Side panel must not treat "no contest yet" as a backend error.
+- Decision: `GET /api/contest/status` returns 200 with `initialized: false` and empty collections when `getCurrentStats()` is null. Configured snapshots add `initialized: true` plus ContestStats fields.
+- Rationale: A 404/500 would look like backend-unreachable (ADR-009).
+- Consequences: UI keys off `initialized` and `backendUnreachable`, not HTTP status alone.
+
+## ADR-026: ENDED Stops via Phase 7 Hook After Status/Health Observe
+- Context: ADR-006 detects ENDED on the backend. ADR-021 already exported `handleContestEnded` / `CONTEST_ENDED`. Must not invent a second alarm-clear path.
+- Decision: After each scrape cycle, `observeEndedAndStop()` reads `GET /api/contest/status`. Side panel and popup also send `{ type: "CONTEST_ENDED" }` when they see `lifecycleState === "ENDED"`. SW startup uses `GET /health` (`observeEndedFromHealth`). All three call `handleContestEnded()` → `stopMonitoringAlarm()`.
+- Rationale: The backend is the detector; the extension only observes. One hook keeps `monitoringStopped` consistent across SW restarts.
+- Consequences: Up to one extra cycle can run after ENDED until the post-cycle status read (or the 5s UI poll). No ingest-response field was added — status/health already carry `lifecycleState`.

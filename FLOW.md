@@ -36,12 +36,13 @@ Two processes communicate over HTTP on localhost:8080.
 2. `ensureMonitoringAlarm()` — if problem tabs are persisted, `monitoringStopped` is false, and `scrapeCycle` is missing (unpacked reload), re-register with the stored period. Do not call `runScrapeCycle()` on restart
 3. `cycleInProgress` still skips a live overlapping tick
 
-## Contest ENDED (Phase 7 hook; detection is Phase 11)
+## Contest ENDED (ADR-006 + ADR-026)
 
-1. Phase 11 `ContestLifecycleService` marks `lifecycleState=ENDED` (ADR-006: 3 unchanged cycles) and the extension observes it via health/status (Phase 10)
-2. Phase 11 sends `{ type: "CONTEST_ENDED" }` or calls `handleContestEnded()`
-3. `stopMonitoringAlarm()` → `chrome.alarms.clear('scrapeCycle')` + `monitoringStopped=true`
-4. `runScrapeCycle` / `onAlarm` refuse new cycles; SW restart will not recreate the alarm
+1. `ContestLifecycleService` (inside synchronized `applyIngest`) counts complete Q1–Q4 rounds whose four percentages are unchanged. The third identical round publishes `lifecycleState=ENDED`.
+2. Extension observes ENDED via one of: post-cycle `GET /status`, side-panel/popup 5s poll, or SW-startup `GET /health`.
+3. All observers call the Phase 7 hook `handleContestEnded()` / `{ type: "CONTEST_ENDED" }` — the only stop path.
+4. `stopMonitoringAlarm()` → `chrome.alarms.clear('scrapeCycle')` + `monitoringStopped=true`
+5. `runScrapeCycle` / `onAlarm` refuse new cycles; SW restart will not recreate the alarm
 
 ## One Full Monitoring Cycle (Both Processes)
 
@@ -63,6 +64,7 @@ sequenceDiagram
     AS->>TLM: getCycleInProgress()
     TLM-->>AS: false
     AS->>TLM: setCycleInProgress(true)
+    AS->>TLM: recoverMissingTabs()
     loop Q1 to Q4 sequential
         AS->>AS: registerPendingScrape(tabId, Qn)
         AS->>TLM: reloadTab(tabId)
@@ -75,8 +77,8 @@ sequenceDiagram
             API->>SVC: applyIngest (synchronized)
             SVC->>SVC: deep-copy QuestionStats
             SVC->>SVC: parse + calculatePercentage
-            SVC->>SVC: ranking = previous (TODO Phase 8)
-            SVC->>SVC: overtakes = previous (TODO Phase 9)
+            SVC->>SVC: RankingService.computeRanking (desc %, null last)
+            SVC->>SVC: ComparisonService.detectOvertakes (Qx<=Qy → Qx>Qy)
             SVC->>REF: AtomicReference.set(newSnapshot)
             SVC-->>API: QuestionStats
             API-->>BC: 200 + acceptedUsers, totalUsers, usersAcceptedPercentage
@@ -86,11 +88,15 @@ sequenceDiagram
         end
     end
     AS->>TLM: setCycleInProgress(false)
+    AS->>API: GET /api/contest/status (ENDED observe)
+    alt lifecycleState ENDED
+        AS->>AS: handleContestEnded()
+    end
     SP->>API: GET /api/contest/status (every 5s)
-    API->>REF: AtomicReference.get()
-    REF-->>API: ContestStats snapshot
-    API-->>SP: 200 OK + ContestStats JSON
-    SP->>SP: render dashboard
+    API->>REF: AtomicReference.get() (lock-free)
+    REF-->>API: ContestStats snapshot or null
+    API-->>SP: 200 + initialized/questions/ranking/recentChanges
+    SP->>SP: render dashboard or empty / backend-unreachable banner
 ```
 
 ## Backend-Unreachable Path

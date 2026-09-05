@@ -1,9 +1,10 @@
 /*
  * File: ContestStateService.java
  * Author: Backend/Core Agent
- * Phase: Phase 6 — Four Questions + Concurrency
+ * Phase: Phase 11 — Robustness + Lifecycle
  * Purpose: Central thread-safe state management. applyIngest wraps parse → calculate →
- *          ranking stub → overtake stub → snapshot publish in a single synchronized critical section.
+ *          recompute ranking → compute overtakes → lifecycle → snapshot publish
+ *          in a single synchronized critical section.
  *
  * Concurrency & Architecture Notes:
  * This class owns the ContestStateService critical section per Section 7A-2 / ADR-003.
@@ -49,18 +50,30 @@ public class ContestStateService {
     private final AtomicReference<ContestStats> currentStats = new AtomicReference<>();
     private final AcceptanceStatsParser acceptanceStatsParser;
     private final AcceptanceCalculationService acceptanceCalculationService;
+    private final RankingService rankingService;
+    private final ComparisonService comparisonService;
+    private final ContestLifecycleService contestLifecycleService;
 
     /**
-     * Constructs the service with parser and percentage calculator.
+     * Constructs the service with parser, calculator, ranking, overtake, and lifecycle.
      *
      * @param acceptanceStatsParser         parser for raw acceptance strings
      * @param acceptanceCalculationService  BigDecimal percentage calculator
+     * @param rankingService                ranks questions by acceptance percentage
+     * @param comparisonService             pairwise overtake detector
+     * @param contestLifecycleService       ADR-006 ENDED detection
      */
     public ContestStateService(
             AcceptanceStatsParser acceptanceStatsParser,
-            AcceptanceCalculationService acceptanceCalculationService) {
+            AcceptanceCalculationService acceptanceCalculationService,
+            RankingService rankingService,
+            ComparisonService comparisonService,
+            ContestLifecycleService contestLifecycleService) {
         this.acceptanceStatsParser = acceptanceStatsParser;
         this.acceptanceCalculationService = acceptanceCalculationService;
+        this.rankingService = rankingService;
+        this.comparisonService = comparisonService;
+        this.contestLifecycleService = contestLifecycleService;
     }
 
     /**
@@ -96,6 +109,7 @@ public class ContestStateService {
                 .pairwiseRelationships(Collections.emptyMap())
                 .build();
 
+        contestLifecycleService.reset();
         currentStats.set(newStats);
         logger.info("Contest state successfully initialized with lifecycleState=INITIALISED");
     }
@@ -104,7 +118,7 @@ public class ContestStateService {
      * Updates question statistics with inbound scraped data and publishes an updated contest snapshot.
      *
      * <p>Critical section: method-level {@code synchronized} wraps the full compound transition
-     * (deep-copy → apply ingest → parse/calculate → ranking stub → overtake stub → publish).
+     * (deep-copy → apply ingest → parse/calculate → ranking → overtakes → lifecycle → publish).
      * AtomicReference alone is not sufficient (ADR-003).</p>
      *
      * @param questionNumber the question slot identifier (e.g., "Q1", "Q2", "Q3", "Q4")
@@ -143,14 +157,22 @@ public class ContestStateService {
             throw new IllegalArgumentException("Question " + questionNumber + " not found in contest configuration");
         }
 
-        String nextLifecycleState = "INITIALISED".equals(previous.getLifecycleState()) ? "MONITORING" : previous.getLifecycleState();
+        String nextLifecycleState = contestLifecycleService.nextLifecycleState(
+                previous.getLifecycleState(),
+                updatedQuestions,
+                questionNumber
+        );
 
-        // TODO(Phase 8): recompute ranking from usersAcceptedPercentage descending
-        List<String> ranking = previous.getRanking();
-
-        // TODO(Phase 9): compute overtakes / pairwiseRelationships from previous vs new snapshot
-        List<RankingChange> recentChanges = previous.getRecentChanges();
-        Map<String, String> pairwiseRelationships = previous.getPairwiseRelationships();
+        // Ranking + overtakes are part of the same synchronized publish (Section 7A-2).
+        List<String> ranking = rankingService.computeRanking(updatedQuestions);
+        ComparisonService.ComparisonOutcome comparison = comparisonService.detectOvertakes(
+                previous.getQuestions(),
+                updatedQuestions,
+                previous.getPairwiseRelationships(),
+                previous.getRecentChanges()
+        );
+        List<RankingChange> recentChanges = comparison.recentChanges();
+        Map<String, String> pairwiseRelationships = comparison.pairwiseRelationships();
 
         ContestStats newSnapshot = ContestStats.builder()
                 .contestUrl(previous.getContestUrl())
