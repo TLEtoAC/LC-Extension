@@ -37,6 +37,10 @@ coverage/
 dist/
 build/
 
+# Chrome extension signing (never commit private keys or packed builds)
+*.pem
+*.crx
+
 # Environment and Secret files
 .env
 .env.local

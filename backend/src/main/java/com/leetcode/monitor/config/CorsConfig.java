@@ -32,7 +32,7 @@ public class CorsConfig implements WebMvcConfigurer {
      * The origin of the Chrome Extension permitted to communicate with this backend.
      * Replace PLACEHOLDER_EXTENSION_ID with the fixed extension ID generated from the manifest 'key'.
      */
-    public static final String EXTENSION_ORIGIN = "chrome-extension://PLACEHOLDER_EXTENSION_ID";
+    public static final String EXTENSION_ORIGIN = "chrome-extension://gfmdknhhmpjeocghifknkekdbikgenil";
 
     /**
      * Configures CORS mappings for the application REST API endpoints (/api/**).
