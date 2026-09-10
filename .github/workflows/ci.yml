@@ -1,0 +1,74 @@
+# LeetCode Contest Monitor v5 — continuous integration
+#
+# Runs on every push and pull request to main / phase1:
+#   • Backend:  Maven test (Java 17, Spring Boot) — 87 JUnit tests
+#   • Extension: node --check on all JS + Jest — 8 tests
+#
+# Jobs run in parallel; both must pass for a green CI run.
+
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - phase1
+  pull_request:
+    branches:
+      - main
+      - phase1
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend (JUnit)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: maven
+
+      - name: Run tests
+        run: mvn -B test
+
+  extension:
+    name: Extension (Jest + syntax)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: extension
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: extension/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Syntax check (node --check)
+        run: |
+          find . -name '*.js' -not -path './node_modules/*' -print0 \
+            | xargs -0 node --check
+
+      - name: Run Jest
+        run: npm test
