@@ -216,8 +216,8 @@ async function handleSave(_event) {
 /**
  * Handles the "Open Side Panel" button click.
  *
- * Sends a message to the background asking it to open the side panel for
- * the current tab. Falls back to a console warning if the API is unavailable.
+ * Opens the side panel directly (must stay on this page — messaging the
+ * service worker loses the user gesture Chrome requires).
  *
  * @param {MouseEvent} event
  * @returns {Promise<void>}
@@ -225,7 +225,11 @@ async function handleSave(_event) {
 async function handleOpenSidePanel(event) {
   event.preventDefault();
   try {
-    await chrome.runtime.sendMessage({ type: 'OPEN_SIDE_PANEL' });
+    const win = await chrome.windows.getCurrent();
+    if (win?.id == null) {
+      throw new Error('NO_WINDOW');
+    }
+    await chrome.sidePanel.open({ windowId: win.id });
   } catch (err) {
     console.warn('[options] Could not open side panel:', err.message);
   }

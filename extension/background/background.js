@@ -330,33 +330,6 @@ async function handleContestEndedMessage(message, sender, sendResponse) {
   sendResponse({ ok: true });
 }
 
-/**
- * Opens the dashboard side panel for the sender's window (Phase 10).
- *
- * @param {object} message
- * @param {chrome.runtime.MessageSender} sender
- * @param {function} sendResponse
- * @returns {Promise<void>}
- */
-async function handleOpenSidePanel(message, sender, sendResponse) {
-  try {
-    let windowId = sender?.tab?.windowId;
-    if (windowId == null) {
-      const focused = await chrome.windows.getLastFocused();
-      windowId = focused?.id;
-    }
-    if (windowId == null) {
-      sendResponse({ ok: false, error: 'NO_WINDOW' });
-      return;
-    }
-    await chrome.sidePanel.open({ windowId });
-    sendResponse({ ok: true, windowId });
-  } catch (err) {
-    console.error('[background] OPEN_SIDE_PANEL failed:', err);
-    sendResponse({ ok: false, error: err?.message ?? 'OPEN_FAILED' });
-  }
-}
-
 // ─── onMessage ───────────────────────────────────────────────────────────────
 
 /**
@@ -374,7 +347,6 @@ async function handleOpenSidePanel(message, sender, sendResponse) {
  *   MONITORING_INTERVAL_SAVED — Phase 7: persist interval and re-register scrapeCycle
  *   CONTEST_ENDED             — Phase 11 hook: clear scrapeCycle (handleContestEnded)
  *   SCRAPE_RESULT             — Phase 6: postIngest + resolve pending scrape
- *   OPEN_SIDE_PANEL           — Phase 10: open the side panel
  *
  * @param {object} message         The message object sent by the caller.
  * @param {string} message.type    Identifies the message kind.
@@ -413,10 +385,6 @@ function onMessage(message, sender, sendResponse) {
 
     case 'SCRAPE_RESULT':
       handleScrapeResult(message, sender, sendResponse);
-      break;
-
-    case 'OPEN_SIDE_PANEL':
-      handleOpenSidePanel(message, sender, sendResponse);
       break;
 
     default:

@@ -7,6 +7,7 @@
  */
 
 import { getStatus } from '../background/backendClient.js';
+import { openSidePanelFromClick } from './openSidePanel.js';
 
 const backendBanner = document.getElementById('backendBanner');
 const emptyBanner = document.getElementById('emptyBanner');
@@ -66,13 +67,11 @@ async function refresh() {
   }
 }
 
-document.getElementById('openSidePanel')?.addEventListener('click', async (event) => {
+document.getElementById('openSidePanel')?.addEventListener('click', (event) => {
   event.preventDefault();
-  try {
-    await chrome.runtime.sendMessage({ type: 'OPEN_SIDE_PANEL' });
-  } catch (err) {
-    console.warn('[popup] OPEN_SIDE_PANEL failed:', err?.message);
-  }
+  openSidePanelFromClick().catch((err) => {
+    console.warn('[popup] sidePanel.open failed:', err?.message);
+  });
 });
 
 if (document.readyState === 'loading') {
