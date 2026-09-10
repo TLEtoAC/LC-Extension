@@ -23,7 +23,7 @@
   "name": "LeetCode Contest Monitor",
   "version": "1.0.0",
   "description": "Monitors Users Accepted percentages for all 4 problems in a LeetCode contest.",
-  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAy/5XdbsxGyzPgs6f9mzWob4Icj0WQuCjlBWO3rz167Ms6+8J454ZBEcaHHazNsMi1+R78d4tWdam3TkiAK0lyXmbUZ5m3vIdYccWkMbHpcdm6Qkj6q7cBdl2KzjjNcBLInO8tfuWYgMzwTSJ2hW1u1lzNkxUEeGCXYJMt7aSBoorzSINkY2urv/wka8HvzmoctH+KqktfI9wu5WOVFiSAVB9LiuGDfUWLnHUFvXzLXf8VM9bRAO+KLPGSKIsmLqiJgmK9uq6VY6cMNIpf6QlDC1H7a1fV4P53ptt1+Ab/A4njhVOLgNPE7YgLiA5DeKfUfM5vG1MbIilBj+WMaGyhwIDAQAB%",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAy/5XdbsxGyzPgs6f9mzWob4Icj0WQuCjlBWO3rz167Ms6+8J454ZBEcaHHazNsMi1+R78d4tWdam3TkiAK0lyXmbUZ5m3vIdYccWkMbHpcdm6Qkj6q7cBdl2KzjjNcBLInO8tfuWYgMzwTSJ2hW1u1lzNkxUEeGCXYJMt7aSBoorzSINkY2urv/wka8HvzmoctH+KqktfI9wu5WOVFiSAVB9LiuGDfUWLnHUFvXzLXf8VM9bRAO+KLPGSKIsmLqiJgmK9uq6VY6cMNIpf6QlDC1H7a1fV4P53ptt1+Ab/A4njhVOLgNPE7YgLiA5DeKfUfM5vG1MbIilBj+WMaGyhwIDAQAB",
   "permissions": ["tabs", "storage", "alarms", "sidePanel", "scripting"],
   "host_permissions": [
     "https://leetcode.com/*",
